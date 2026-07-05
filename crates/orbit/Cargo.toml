@@ -1,0 +1,25 @@
+[package]
+name = "orbit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbit — TUI client. Universal terminal workspace."
+
+[[bin]]
+name = "orbit"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+interprocess = { workspace = true }
+bincode = { workspace = true }
+orbit-protocol = { workspace = true }
+orbit-core = { workspace = true }
