@@ -1,10 +1,20 @@
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
+use orbit_core::VtParser;
 use orbit_protocol::{PaneId, ServerEvent};
 use portable_pty::{CommandBuilder, PtySize};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, warn};
+
+pub type SharedVtParser = Arc<Mutex<VtParser>>;
+pub type SharedMaster = Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>;
+
+pub struct PtyHandles {
+    pub parser: SharedVtParser,
+    pub master: SharedMaster,
+}
 
 pub async fn spawn_pty(
     pane_id: PaneId,
@@ -14,7 +24,7 @@ pub async fn spawn_pty(
     rows: u16,
     event_bus: broadcast::Sender<ServerEvent>,
     mut input_rx: mpsc::Receiver<Vec<u8>>,
-) -> Result<()> {
+) -> Result<PtyHandles> {
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -46,8 +56,12 @@ pub async fn spawn_pty(
         .try_clone_reader()
         .context("failed to clone PTY reader")?;
 
+    let shared_parser: SharedVtParser = Arc::new(Mutex::new(VtParser::new(cols, rows)));
+    let shared_master: SharedMaster = Arc::new(Mutex::new(pair.master));
+
     {
         let event_bus = event_bus.clone();
+        let shared_parser = shared_parser.clone();
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
             let mut buf = [0u8; 8192];
@@ -56,6 +70,9 @@ pub async fn spawn_pty(
                     Ok(0) => break,
                     Ok(n) => {
                         let data = buf[..n].to_vec();
+                        if let Ok(mut parser) = shared_parser.lock() {
+                            parser.process(&data);
+                        }
                         let _ = event_bus.send(ServerEvent::PaneOutput { pane_id, data });
                     }
                     Err(e) => {
@@ -82,8 +99,10 @@ pub async fn spawn_pty(
         });
     }
 
-    std::mem::forget(pair.master);
     std::mem::forget(child);
 
-    Ok(())
+    Ok(PtyHandles {
+        parser: shared_parser,
+        master: shared_master,
+    })
 }

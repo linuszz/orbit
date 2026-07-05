@@ -98,7 +98,7 @@ pub async fn handle_client(
                         ).await;
                     }
                     ClientMessage::ResizePane { cols, rows, .. } => {
-                        debug!("resize request: {cols}x{rows} (not yet implemented)");
+                        session.resize_pty(cols, rows);
                     }
                     _ => {}
                 }

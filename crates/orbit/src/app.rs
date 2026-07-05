@@ -1,5 +1,5 @@
 use orbit_core::VtParser;
-use orbit_protocol::{PaneId, ServerEvent};
+use orbit_protocol::{CellGrid, PaneId, ServerEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
@@ -26,6 +26,15 @@ impl App {
             needs_redraw: true,
             server_connected: true,
         }
+    }
+
+    pub fn apply_snapshot(&mut self, grid: &CellGrid) {
+        self.parser.grid.cols = grid.cols;
+        self.parser.grid.rows = grid.rows;
+        self.parser.grid.cells = grid.cells.clone();
+        self.parser.grid.cursor_x = grid.cursor_x;
+        self.parser.grid.cursor_y = grid.cursor_y;
+        self.needs_redraw = true;
     }
 
     pub fn handle_server_event(&mut self, event: &ServerEvent) {

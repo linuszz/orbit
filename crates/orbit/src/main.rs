@@ -44,11 +44,22 @@ async fn main() -> Result<()> {
 
     let mut app = App::new(cols, rows, pane_id);
 
+    if let Some(pane_info) = state.spaces.first().and_then(|s| s.panes.first()) {
+        app.apply_snapshot(&pane_info.cell_grid);
+    }
+
     let _ = ipc
         .send(&ClientMessage::ResizePane {
             pane_id,
-            cols,
-            rows,
+            cols: cols.saturating_sub(1),
+            rows: rows.saturating_sub(2),
+        })
+        .await;
+
+    let _ = ipc
+        .send(&ClientMessage::PaneInput {
+            pane_id,
+            data: b"\x0c".to_vec(),
         })
         .await;
 

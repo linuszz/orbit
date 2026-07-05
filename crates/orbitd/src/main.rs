@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     let cols = 80u16;
     let rows = 24u16;
 
-    pty::spawn_pty(
+    let handles = pty::spawn_pty(
         orbit_protocol::PaneId(0),
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()),
         ".",
@@ -73,8 +73,8 @@ async fn main() -> Result<()> {
     let session = Arc::new(SessionState::new(
         pty_input_tx,
         event_bus.clone(),
-        cols,
-        rows,
+        handles.parser,
+        handles.master,
     ));
     info!("orbitd ready — 1 space, 1 pane (bash)");
 
