@@ -1,0 +1,3 @@
+# Clippy lint configuration. See 06_tech-design/01-tech-stack-and-workspace.md §2.1.
+msrv = "1.75"
+too-many-arguments-threshold = 8

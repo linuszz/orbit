@@ -1,0 +1,76 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/orbit",
+    "crates/orbitd",
+    "crates/orbit-protocol",
+    "crates/orbit-core",
+    # "crates/orbit-plugin",  # Phase 4 (Mars): WASM plugin runtime. Uncomment when activating.
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/linuszz/orbit"
+authors = ["Linus"]
+
+# Unified dependency versions. Each crate pulls via `{ workspace = true }`.
+# See 06_tech-design/01-tech-stack-and-workspace.md §2.2 and v5 pre-implementation checklist GAP 1.
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# bincode 2.x: the `serde` feature flag is REQUIRED to access the `bincode::serde`
+# module (encode_to_vec / decode_from_slice). Message types only derive
+# serde::Serialize/Deserialize; do NOT derive bincode::Encode.
+bincode = { version = "2", features = ["serde"] }
+toml = "0.8"  # config file format
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Misc
+regex = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# TUI (used by `orbit` client)
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
+
+# PTY + IPC + VT (shared by `orbit` and `orbitd`)
+interprocess = { version = "2", features = ["tokio"] }
+portable-pty = "0.9"
+vte = "0.13"
+
+# Process metrics (orbitd-only; declared in orbitd/Cargo.toml as an optional dep).
+# sysinfo = "0.30"
+
+# Unix-specific (SO_PEERCRED, getuid). Unix-only; gate with #[cfg(unix)].
+libc = "0.2"
+
+# Phase 3 dependencies (commented out — activate when Phase 3 starts)
+# base64 = "0.22"  # Kitty graphics protocol image encoding
+
+# Internal crates (path dependencies)
+orbit-protocol = { path = "crates/orbit-protocol" }
+orbit-core = { path = "crates/orbit-core" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+# Faster dev builds: skip optimizations, keep some debug info.
+[profile.dev]
+opt-level = 0
+debug = 1

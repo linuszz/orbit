@@ -1,0 +1,4 @@
+# Pin the Rust toolchain. Per v5 pre-implementation checklist GAP 5.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

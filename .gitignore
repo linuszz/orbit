@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target
+/**/*.rs.bk
+*.pdb
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Note: Cargo.lock IS tracked in git — this is an application project, not a library.

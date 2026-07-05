@@ -1,0 +1,7 @@
+# Cargo build configuration. See 06_tech-design/01-tech-stack-and-workspace.md §2.1.
+[build]
+# Set `target` here only if cross-compiling.
+
+[env]
+# Override at runtime via ORBIT_LOG_LEVEL=debug, etc.
+# RUST_LOG = "info"
