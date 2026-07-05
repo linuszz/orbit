@@ -1,0 +1,30 @@
+[package]
+name = "orbitd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Orbit daemon — session, PTY, and agent runtime server."
+
+[[bin]]
+name = "orbitd"
+path = "src/main.rs"
+
+[features]
+default = ["sysinfo-metrics"]
+sysinfo-metrics = ["dep:sysinfo"]
+
+[dependencies]
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+interprocess = { workspace = true }
+portable-pty = { workspace = true }
+libc = { workspace = true }
+regex = { workspace = true }
+orbit-protocol = { workspace = true }
+orbit-core = { workspace = true }
+sysinfo = { version = "0.30", optional = true }
