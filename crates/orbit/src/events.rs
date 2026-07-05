@@ -1,2 +1,142 @@
-//! crossterm event loop (tick + key/mouse/resize) + keyboard/mouse handlers.
-//! See `06_tech-design/02-tui-architecture.md` §3 and `06-input-routing-and-modes.md` §7.
+use anyhow::Result;
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
+use futures::StreamExt;
+use orbit_protocol::ClientMessage;
+use tracing::debug;
+
+use crate::app::{App, InputMode};
+use crate::ipc::{IpcClient, IpcWriter};
+use crate::tui::{render, OrbitTerminal};
+
+fn is_prefix_key(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b')
+}
+
+fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
+    let code = key.code;
+    let mods = key.modifiers;
+    match (mods, code) {
+        (m, KeyCode::Char(c))
+            if m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) =>
+        {
+            Some(vec![(c as u8) & 0x1f])
+        }
+        (m, KeyCode::Char(c)) if m.contains(KeyModifiers::ALT) => {
+            let mut bytes = vec![0x1b];
+            bytes.extend(c.to_string().as_bytes());
+            Some(bytes)
+        }
+        (_, KeyCode::Char(c)) => Some(c.to_string().into_bytes()),
+        (_, KeyCode::Enter) => Some(b"\r".to_vec()),
+        (_, KeyCode::Backspace) => Some(b"\x7f".to_vec()),
+        (_, KeyCode::Tab) => Some(b"\t".to_vec()),
+        (_, KeyCode::Up) => Some(b"\x1b[A".to_vec()),
+        (_, KeyCode::Down) => Some(b"\x1b[B".to_vec()),
+        (_, KeyCode::Right) => Some(b"\x1b[C".to_vec()),
+        (_, KeyCode::Left) => Some(b"\x1b[D".to_vec()),
+        (_, KeyCode::Home) => Some(b"\x1b[H".to_vec()),
+        (_, KeyCode::End) => Some(b"\x1b[F".to_vec()),
+        (_, KeyCode::PageUp) => Some(b"\x1b[5~".to_vec()),
+        (_, KeyCode::PageDown) => Some(b"\x1b[6~".to_vec()),
+        (_, KeyCode::Delete) => Some(b"\x1b[3~".to_vec()),
+        (_, KeyCode::Esc) => Some(b"\x1b".to_vec()),
+        _ => None,
+    }
+}
+
+async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
+    match app.mode {
+        InputMode::Normal => {
+            if is_prefix_key(&key) {
+                app.mode = InputMode::Prefix;
+                app.needs_redraw = true;
+                return;
+            }
+            if let Some(bytes) = key_to_pty_bytes(&key) {
+                let _ = writer
+                    .send(ClientMessage::PaneInput {
+                        pane_id: app.pane_id,
+                        data: bytes,
+                    })
+                    .await;
+            }
+        }
+        InputMode::Prefix => match key.code {
+            KeyCode::Char('x') => {
+                debug!("close pane requested");
+                let _ = writer
+                    .send(ClientMessage::ClosePane {
+                        pane_id: app.pane_id,
+                    })
+                    .await;
+                app.should_quit = true;
+            }
+            KeyCode::Char('d') => {
+                debug!("detach requested");
+                app.should_quit = true;
+            }
+            KeyCode::Esc | KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.mode = InputMode::Normal;
+                app.needs_redraw = true;
+            }
+            _ => {
+                app.mode = InputMode::Normal;
+                app.needs_redraw = true;
+            }
+        },
+    }
+}
+
+pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) -> Result<()> {
+    let (writer, mut reader) = ipc.into_split();
+    let mut event_stream = EventStream::new();
+
+    app.needs_redraw = true;
+
+    loop {
+        if app.needs_redraw {
+            terminal.draw(|frame| render(frame, app))?;
+            app.needs_redraw = false;
+        }
+
+        if app.should_quit {
+            break;
+        }
+
+        tokio::select! {
+            biased;
+
+            event_result = reader.recv() => {
+                match event_result {
+                    Ok(event) => app.handle_server_event(&event),
+                    Err(e) => {
+                        debug!("server disconnected: {e:#}");
+                        app.server_connected = false;
+                        app.should_quit = true;
+                    }
+                }
+            }
+
+            raw = event_stream.next() => {
+                match raw {
+                    Some(Ok(Event::Key(key))) => {
+                        handle_key(key, app, &writer).await;
+                    }
+                    Some(Ok(Event::Resize(_, _))) => {
+                        app.needs_redraw = true;
+                    }
+                    Some(Err(e)) => {
+                        debug!("event stream error: {e}");
+                    }
+                    None => {
+                        debug!("event stream closed");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
