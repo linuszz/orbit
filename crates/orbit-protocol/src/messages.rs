@@ -16,7 +16,7 @@ pub struct Capabilities {
     pub mcp_bridge: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     Hello {
         client_version: String,
@@ -78,7 +78,7 @@ pub enum ClientMessage {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerEvent {
     Welcome {
         server_version: String,
