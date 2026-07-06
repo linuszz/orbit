@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 
     let mut app = App::from_welcome(&state, pane_cols, pane_rows);
 
-    for &pid in &app.pane_order.clone() {
+    for &pid in &app.pane_tree.leaves() {
         let _ = ipc
             .send(&ClientMessage::ResizePane {
                 pane_id: pid,

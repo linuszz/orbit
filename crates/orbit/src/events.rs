@@ -27,7 +27,8 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
         (_, KeyCode::Char(c)) => Some(c.to_string().into_bytes()),
         (_, KeyCode::Enter) => Some(b"\r".to_vec()),
         (_, KeyCode::Backspace) => Some(b"\x7f".to_vec()),
-        (_, KeyCode::Tab) => None, // handled separately for pane focus
+        // handled separately for pane focus
+        (_, KeyCode::Tab) => None,
         (_, KeyCode::Up) => Some(b"\x1b[A".to_vec()),
         (_, KeyCode::Down) => Some(b"\x1b[B".to_vec()),
         (_, KeyCode::Right) => Some(b"\x1b[C".to_vec()),
@@ -50,7 +51,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 app.needs_redraw = true;
                 return;
             }
-            if key.code == KeyCode::Tab && app.pane_order.len() > 1 {
+            if key.code == KeyCode::Tab && app.pane_tree.leaves().len() > 1 {
                 app.cycle_focus();
                 let _ = writer
                     .send(ClientMessage::FocusPane {
@@ -76,8 +77,9 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
             }
             match key.code {
                 KeyCode::Char('x') => {
+                    let leaves = app.pane_tree.leaves();
                     let pane_id = app.active_pane;
-                    if app.pane_order.len() <= 1 {
+                    if leaves.len() <= 1 {
                         app.should_quit = true;
                     }
                     let _ = writer.send(ClientMessage::ClosePane { pane_id }).await;
@@ -86,7 +88,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                     app.should_quit = true;
                 }
                 KeyCode::Char('h') => {
-                    app.layout = SplitDir::Horizontal;
+                    app.pending_split = Some((app.active_pane, SplitDir::Horizontal));
                     let _ = writer
                         .send(ClientMessage::SplitPane {
                             pane_id: app.active_pane,
@@ -95,7 +97,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                         .await;
                 }
                 KeyCode::Char('v') => {
-                    app.layout = SplitDir::Vertical;
+                    app.pending_split = Some((app.active_pane, SplitDir::Vertical));
                     let _ = writer
                         .send(ClientMessage::SplitPane {
                             pane_id: app.active_pane,
@@ -152,31 +154,7 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                     Some(Ok(Event::Key(key))) => {
                         handle_key(key, app, &writer).await;
                     }
-                    Some(Ok(Event::Resize(cols, rows))) => {
-                        let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
-                        let n = app.pane_order.len().max(1);
-                        let total_cols = cols.saturating_sub(sidebar_w).max(20);
-                        let total_rows = rows.saturating_sub(3).max(5);
-                        let pane_cols = if app.layout == SplitDir::Horizontal {
-                            total_cols / n as u16
-                        } else {
-                            total_cols
-                        };
-                        let pane_rows = if app.layout == SplitDir::Vertical {
-                            total_rows / n as u16
-                        } else {
-                            total_rows
-                        };
-                        for &pid in &app.pane_order {
-                            if let Some(pane) = app.panes.get_mut(&pid) {
-                                pane.parser.grid.resize(pane_cols, pane_rows);
-                            }
-                            let _ = writer.send(ClientMessage::ResizePane {
-                                pane_id: pid,
-                                cols: pane_cols,
-                                rows: pane_rows,
-                            }).await;
-                        }
+                    Some(Ok(Event::Resize(_, _))) => {
                         app.needs_redraw = true;
                     }
                     Some(Err(e)) => debug!("event stream error: {e}"),

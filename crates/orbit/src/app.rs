@@ -13,11 +13,75 @@ pub struct PaneState {
     pub parser: VtParser,
 }
 
+#[derive(Debug, Clone)]
+pub enum PaneNode {
+    Leaf(PaneId),
+    Split {
+        direction: SplitDir,
+        first: Box<PaneNode>,
+        second: Box<PaneNode>,
+    },
+}
+
+impl PaneNode {
+    pub fn split_leaf(&mut self, target: PaneId, direction: SplitDir, new_id: PaneId) -> bool {
+        match self {
+            PaneNode::Leaf(id) if *id == target => {
+                *self = PaneNode::Split {
+                    direction,
+                    first: Box::new(PaneNode::Leaf(target)),
+                    second: Box::new(PaneNode::Leaf(new_id)),
+                };
+                true
+            }
+            PaneNode::Leaf(_) => false,
+            PaneNode::Split { first, second, .. } => {
+                first.split_leaf(target, direction, new_id)
+                    || second.split_leaf(target, direction, new_id)
+            }
+        }
+    }
+
+    pub fn remove_leaf(&mut self, target: PaneId) -> bool {
+        match self {
+            PaneNode::Leaf(id) => *id != target,
+            PaneNode::Split { first, second, .. } => {
+                if let PaneNode::Leaf(id) = **first {
+                    if id == target {
+                        *self = (**second).clone();
+                        return true;
+                    }
+                }
+                if let PaneNode::Leaf(id) = **second {
+                    if id == target {
+                        *self = (**first).clone();
+                        return true;
+                    }
+                }
+                first.remove_leaf(target);
+                second.remove_leaf(target);
+                true
+            }
+        }
+    }
+
+    pub fn leaves(&self) -> Vec<PaneId> {
+        match self {
+            PaneNode::Leaf(id) => vec![*id],
+            PaneNode::Split { first, second, .. } => {
+                let mut v = first.leaves();
+                v.extend(second.leaves());
+                v
+            }
+        }
+    }
+}
+
 pub struct App {
     pub panes: HashMap<PaneId, PaneState>,
-    pub pane_order: Vec<PaneId>,
+    pub pane_tree: PaneNode,
     pub active_pane: PaneId,
-    pub layout: SplitDir,
+    pub pending_split: Option<(PaneId, SplitDir)>,
     pub mode: InputMode,
     pub should_quit: bool,
     pub needs_redraw: bool,
@@ -32,7 +96,7 @@ impl App {
     pub fn from_welcome(state: &FullState, cols: u16, rows: u16) -> Self {
         let space = state.spaces.first();
         let mut panes = HashMap::new();
-        let mut pane_order = Vec::new();
+        let mut pane_tree = PaneNode::Leaf(PaneId(0));
 
         if let Some(s) = space {
             for pane in &s.panes {
@@ -43,7 +107,9 @@ impl App {
                 parser.grid.cursor_y = pane.cell_grid.cursor_y;
                 parser.grid.resize(cols, rows);
                 panes.insert(pane.id, PaneState { parser });
-                pane_order.push(pane.id);
+            }
+            if let Some(first_pane) = s.panes.first() {
+                pane_tree = PaneNode::Leaf(first_pane.id);
             }
         }
 
@@ -54,9 +120,9 @@ impl App {
 
         Self {
             panes,
-            pane_order,
+            pane_tree,
             active_pane,
-            layout: SplitDir::Horizontal,
+            pending_split: None,
             mode: InputMode::Normal,
             should_quit: false,
             needs_redraw: true,
@@ -70,22 +136,16 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn active_pane_id(&self) -> PaneId {
-        self.active_pane
-    }
-
     pub fn cycle_focus(&mut self) {
-        if self.pane_order.len() < 2 {
+        let leaves = self.pane_tree.leaves();
+        if leaves.len() < 2 {
             return;
         }
-        let idx = self
-            .pane_order
+        let idx = leaves
             .iter()
             .position(|&p| p == self.active_pane)
             .unwrap_or(0);
-        let next = (idx + 1) % self.pane_order.len();
-        self.active_pane = self.pane_order[next];
+        self.active_pane = leaves[(idx + 1) % leaves.len()];
         self.needs_redraw = true;
     }
 
@@ -109,18 +169,22 @@ impl App {
                         let parser =
                             VtParser::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
                         self.panes.insert(pane.id, PaneState { parser });
+
+                        if let Some((target, dir)) = self.pending_split.take() {
+                            self.pane_tree.split_leaf(target, dir, pane.id);
+                        }
                     }
                 }
 
                 for &id in old_ids.iter() {
                     if !new_ids.contains(&id) {
                         self.panes.remove(&id);
+                        self.pane_tree.remove_leaf(id);
                     }
                 }
 
-                self.pane_order = info.panes.iter().map(|p| p.id).collect();
                 self.active_pane = info.active_pane;
-                if self.pane_order.is_empty() {
+                if self.pane_tree.leaves().is_empty() {
                     self.should_quit = true;
                 }
                 self.needs_redraw = true;
