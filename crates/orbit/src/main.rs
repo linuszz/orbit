@@ -43,6 +43,7 @@ async fn main() -> Result<()> {
     let rows = terminal.size()?.height;
 
     let mut app = App::new(cols, rows, pane_id);
+    app.space_name = space.name.clone();
 
     if let Some(pane_info) = state.spaces.first().and_then(|s| s.panes.first()) {
         app.apply_snapshot(&pane_info.cell_grid);
@@ -52,7 +53,7 @@ async fn main() -> Result<()> {
         .send(&ClientMessage::ResizePane {
             pane_id,
             cols: cols.saturating_sub(1),
-            rows: rows.saturating_sub(2),
+            rows: rows.saturating_sub(4),
         })
         .await;
 

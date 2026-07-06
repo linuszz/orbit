@@ -14,6 +14,9 @@ pub struct App {
     pub should_quit: bool,
     pub needs_redraw: bool,
     pub server_connected: bool,
+    pub sidebar_visible: bool,
+    pub agent_panel_visible: bool,
+    pub space_name: String,
 }
 
 impl App {
@@ -25,6 +28,9 @@ impl App {
             should_quit: false,
             needs_redraw: true,
             server_connected: true,
+            sidebar_visible: true,
+            agent_panel_visible: false,
+            space_name: "default".to_string(),
         }
     }
 

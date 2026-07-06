@@ -75,7 +75,15 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 debug!("detach requested");
                 app.should_quit = true;
             }
-            KeyCode::Esc | KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('b') => {
+                app.sidebar_visible = !app.sidebar_visible;
+                app.needs_redraw = true;
+            }
+            KeyCode::Char('a') => {
+                app.agent_panel_visible = !app.agent_panel_visible;
+                app.needs_redraw = true;
+            }
+            KeyCode::Esc => {
                 app.mode = InputMode::Normal;
                 app.needs_redraw = true;
             }
