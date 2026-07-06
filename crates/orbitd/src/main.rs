@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use interprocess::local_socket::tokio::prelude::*;
 use interprocess::local_socket::{GenericFilePath, ListenerOptions};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tracing::{error, info};
 
 mod agent;
@@ -17,20 +17,17 @@ use orbit_protocol::ServerEvent;
 
 fn default_socket_path() -> std::path::PathBuf {
     let uid = unsafe { libc::getuid() };
-
     let runtime = format!("/run/user/{uid}");
     let runtime_dir = std::path::Path::new(&runtime);
     if runtime_dir.exists() {
         return runtime_dir.join("orbit.sock");
     }
-
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         let p = std::path::Path::new(&dir);
         if p.exists() {
             return p.join("orbit.sock");
         }
     }
-
     std::env::temp_dir().join(format!("orbit-{uid}.sock"))
 }
 
@@ -64,31 +61,10 @@ async fn main() -> Result<()> {
     info!("orbitd listening on {}", socket_path.display());
 
     let (event_bus, _rx) = broadcast::channel::<ServerEvent>(256);
-    let (pty_input_tx, pty_input_rx) = mpsc::channel::<Vec<u8>>(64);
 
-    let cols = 80u16;
-    let rows = 24u16;
-
-    let handles = pty::spawn_pty(
-        orbit_protocol::PaneId(0),
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()),
-        ".",
-        cols,
-        rows,
-        event_bus.clone(),
-        pty_input_rx,
-        pty_input_tx.clone(),
-    )
-    .await
-    .context("failed to spawn PTY")?;
-
-    let session = Arc::new(SessionState::new(
-        pty_input_tx,
-        event_bus.clone(),
-        handles.parser,
-        handles.master,
-    ));
-    info!("orbitd ready — 1 space, 1 pane (bash)");
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+    let session = Arc::new(SessionState::new(event_bus, shell, ".".to_string(), 80, 24).await?);
+    info!("orbitd ready — 1 space, 1 pane");
 
     tokio::select! {
         res = accept_loop(listener, session.clone()) => {

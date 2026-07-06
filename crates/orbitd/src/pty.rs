@@ -10,22 +10,25 @@ use tracing::{debug, warn};
 
 pub type SharedVtParser = Arc<Mutex<VtParser>>;
 pub type SharedMaster = Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>;
+pub type SharedChild = Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>;
 
 pub struct PtyHandles {
     pub parser: SharedVtParser,
     pub master: SharedMaster,
+    pub child: SharedChild,
+    pub input_tx: mpsc::Sender<Vec<u8>>,
 }
 
 pub async fn spawn_pty(
     pane_id: PaneId,
-    shell: String,
+    shell: &str,
     cwd: &str,
     cols: u16,
     rows: u16,
     event_bus: broadcast::Sender<ServerEvent>,
-    mut input_rx: mpsc::Receiver<Vec<u8>>,
-    input_tx: mpsc::Sender<Vec<u8>>,
 ) -> Result<PtyHandles> {
+    let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(64);
+
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -36,7 +39,7 @@ pub async fn spawn_pty(
         })
         .context("failed to open PTY pair")?;
 
-    let mut cmd = CommandBuilder::new(&shell);
+    let mut cmd = CommandBuilder::new(shell);
     cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -59,11 +62,12 @@ pub async fn spawn_pty(
 
     let shared_parser: SharedVtParser = Arc::new(Mutex::new(VtParser::new(cols, rows)));
     let shared_master: SharedMaster = Arc::new(Mutex::new(pair.master));
+    let shared_child: SharedChild = Arc::new(Mutex::new(child));
 
     {
         let event_bus = event_bus.clone();
         let shared_parser = shared_parser.clone();
-        let reader_tx = input_tx;
+        let reader_tx = input_tx.clone();
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
             let mut buf = [0u8; 8192];
@@ -92,12 +96,12 @@ pub async fn spawn_pty(
                 }
             }
             debug!("PTY reader exited for pane {:?}", pane_id);
-            let _ = event_bus.send(ServerEvent::SpaceClosed(orbit_protocol::SpaceId(0)));
         });
     }
 
     {
         let mut writer = writer;
+        let mut input_rx = input_rx;
         tokio::task::spawn_blocking(move || {
             while let Some(data) = input_rx.blocking_recv() {
                 if writer.write_all(&data).is_err() {
@@ -105,14 +109,14 @@ pub async fn spawn_pty(
                 }
                 let _ = writer.flush();
             }
-            debug!("PTY writer exited");
+            debug!("PTY writer exited for pane {:?}", pane_id);
         });
     }
-
-    std::mem::forget(child);
 
     Ok(PtyHandles {
         parser: shared_parser,
         master: shared_master,
+        child: shared_child,
+        input_tx,
     })
 }

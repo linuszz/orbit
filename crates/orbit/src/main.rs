@@ -20,21 +20,9 @@ async fn main() -> Result<()> {
         .init();
 
     debug!("connecting to orbitd...");
-    let ipc = IpcClient::connect()
+    let (mut ipc, state) = IpcClient::connect()
         .await
         .context("failed to connect to orbitd — is the daemon running?")?;
-
-    let (mut ipc, state) = ipc;
-
-    let space = state
-        .spaces
-        .first()
-        .context("orbitd returned no spaces in Welcome")?;
-    let pane = space
-        .panes
-        .first()
-        .context("orbitd returned no panes in Welcome")?;
-    let pane_id = pane.id;
 
     debug!("setting up terminal...");
     let mut terminal = tui::setup_terminal().context("failed to setup terminal")?;
@@ -43,32 +31,24 @@ async fn main() -> Result<()> {
     let term_rows = terminal.size()?.height;
 
     let sidebar_w: u16 = 14;
-    let overhead_rows: u16 = 3;
-
     let pane_cols = term_cols.saturating_sub(sidebar_w).max(20);
-    let pane_rows = term_rows.saturating_sub(overhead_rows).max(5);
+    let pane_rows = term_rows.saturating_sub(3).max(5);
 
-    let mut app = App::new(pane_cols, pane_rows, pane_id);
-    app.space_name = space.name.clone();
+    let mut app = App::from_welcome(&state, pane_cols, pane_rows);
 
-    if let Some(pane_info) = state.spaces.first().and_then(|s| s.panes.first()) {
-        app.apply_snapshot(&pane_info.cell_grid);
-        app.parser.grid.resize(pane_cols, pane_rows);
+    for &pid in &app.pane_order.clone() {
+        let _ = ipc
+            .send(&ClientMessage::ResizePane {
+                pane_id: pid,
+                cols: pane_cols,
+                rows: pane_rows,
+            })
+            .await;
     }
 
-    let _ = ipc
-        .send(&ClientMessage::ResizePane {
-            pane_id,
-            cols: pane_cols,
-            rows: pane_rows,
-        })
-        .await;
-
-    debug!("entering event loop (pane: {pane_cols}x{pane_rows})");
+    debug!("entering event loop");
     let run_result = events::run(&mut app, ipc, &mut terminal).await;
 
-    debug!("restoring terminal...");
     let _ = tui::restore_terminal(&mut terminal);
-
     run_result
 }

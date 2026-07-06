@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
-use orbit_protocol::ClientMessage;
+use orbit_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
 
 use crate::app::{App, InputMode};
@@ -13,9 +13,7 @@ fn is_prefix_key(key: &KeyEvent) -> bool {
 }
 
 fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
-    let code = key.code;
-    let mods = key.modifiers;
-    match (mods, code) {
+    match (key.modifiers, key.code) {
         (m, KeyCode::Char(c))
             if m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) =>
         {
@@ -29,7 +27,7 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
         (_, KeyCode::Char(c)) => Some(c.to_string().into_bytes()),
         (_, KeyCode::Enter) => Some(b"\r".to_vec()),
         (_, KeyCode::Backspace) => Some(b"\x7f".to_vec()),
-        (_, KeyCode::Tab) => Some(b"\t".to_vec()),
+        (_, KeyCode::Tab) => None, // handled separately for pane focus
         (_, KeyCode::Up) => Some(b"\x1b[A".to_vec()),
         (_, KeyCode::Down) => Some(b"\x1b[B".to_vec()),
         (_, KeyCode::Right) => Some(b"\x1b[C".to_vec()),
@@ -52,10 +50,19 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 app.needs_redraw = true;
                 return;
             }
+            if key.code == KeyCode::Tab && app.pane_order.len() > 1 {
+                app.cycle_focus();
+                let _ = writer
+                    .send(ClientMessage::FocusPane {
+                        pane_id: app.active_pane,
+                    })
+                    .await;
+                return;
+            }
             if let Some(bytes) = key_to_pty_bytes(&key) {
                 let _ = writer
                     .send(ClientMessage::PaneInput {
-                        pane_id: app.pane_id,
+                        pane_id: app.active_pane,
                         data: bytes,
                     })
                     .await;
@@ -69,17 +76,32 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
             }
             match key.code {
                 KeyCode::Char('x') => {
-                    debug!("close pane requested");
-                    let _ = writer
-                        .send(ClientMessage::ClosePane {
-                            pane_id: app.pane_id,
-                        })
-                        .await;
-                    app.should_quit = true;
+                    let pane_id = app.active_pane;
+                    if app.pane_order.len() <= 1 {
+                        app.should_quit = true;
+                    }
+                    let _ = writer.send(ClientMessage::ClosePane { pane_id }).await;
                 }
                 KeyCode::Char('d') => {
-                    debug!("detach requested");
                     app.should_quit = true;
+                }
+                KeyCode::Char('h') => {
+                    app.layout = SplitDir::Horizontal;
+                    let _ = writer
+                        .send(ClientMessage::SplitPane {
+                            pane_id: app.active_pane,
+                            direction: SplitDir::Horizontal,
+                        })
+                        .await;
+                }
+                KeyCode::Char('v') => {
+                    app.layout = SplitDir::Vertical;
+                    let _ = writer
+                        .send(ClientMessage::SplitPane {
+                            pane_id: app.active_pane,
+                            direction: SplitDir::Vertical,
+                        })
+                        .await;
                 }
                 KeyCode::Char('b') => {
                     app.sidebar_visible = !app.sidebar_visible;
@@ -132,25 +154,33 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                     }
                     Some(Ok(Event::Resize(cols, rows))) => {
                         let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
-                        let pane_cols = cols.saturating_sub(sidebar_w).max(20);
-                        let pane_rows = rows.saturating_sub(3).max(5);
-                        app.parser.grid.resize(pane_cols, pane_rows);
-                        let _ = writer
-                            .send(ClientMessage::ResizePane {
-                                pane_id: app.pane_id,
+                        let n = app.pane_order.len().max(1);
+                        let total_cols = cols.saturating_sub(sidebar_w).max(20);
+                        let total_rows = rows.saturating_sub(3).max(5);
+                        let pane_cols = if app.layout == SplitDir::Horizontal {
+                            total_cols / n as u16
+                        } else {
+                            total_cols
+                        };
+                        let pane_rows = if app.layout == SplitDir::Vertical {
+                            total_rows / n as u16
+                        } else {
+                            total_rows
+                        };
+                        for &pid in &app.pane_order {
+                            if let Some(pane) = app.panes.get_mut(&pid) {
+                                pane.parser.grid.resize(pane_cols, pane_rows);
+                            }
+                            let _ = writer.send(ClientMessage::ResizePane {
+                                pane_id: pid,
                                 cols: pane_cols,
                                 rows: pane_rows,
-                            })
-                            .await;
+                            }).await;
+                        }
                         app.needs_redraw = true;
                     }
-                    Some(Err(e)) => {
-                        debug!("event stream error: {e}");
-                    }
-                    None => {
-                        debug!("event stream closed");
-                        break;
-                    }
+                    Some(Err(e)) => debug!("event stream error: {e}"),
+                    None => break,
                     _ => {}
                 }
             }
