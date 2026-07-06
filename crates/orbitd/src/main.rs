@@ -77,6 +77,7 @@ async fn main() -> Result<()> {
         rows,
         event_bus.clone(),
         pty_input_rx,
+        pty_input_tx.clone(),
     )
     .await
     .context("failed to spawn PTY")?;

@@ -84,6 +84,7 @@ impl<'a> vte::Perform for Performer<'a> {
             ([], 'P') => self.grid.delete_chars(p0.max(1)),
             ([], 'm') => self.grid.set_sgr(&p),
             ([], 'r') => self.grid.set_scroll_region(p0, p1),
+            ([], 'c') => self.grid.da1_queried = true,
             ([b'?'], 'h') => self.handle_dec_private_set(p0),
             ([b'?'], 'l') => self.handle_dec_private_reset(p0),
             _ => {}

@@ -11,6 +11,8 @@ pub struct CellGrid {
     pub scroll_bottom: u16,
     pub title: Option<String>,
 
+    pub da1_queried: bool,
+
     current_fg: TermColor,
     current_bg: TermColor,
     current_bold: bool,
@@ -37,6 +39,7 @@ impl CellGrid {
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
             title: None,
+            da1_queried: false,
             current_fg: TermColor::Default,
             current_bg: TermColor::Default,
             current_bold: false,

@@ -24,6 +24,7 @@ pub async fn spawn_pty(
     rows: u16,
     event_bus: broadcast::Sender<ServerEvent>,
     mut input_rx: mpsc::Receiver<Vec<u8>>,
+    input_tx: mpsc::Sender<Vec<u8>>,
 ) -> Result<PtyHandles> {
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system
@@ -62,6 +63,7 @@ pub async fn spawn_pty(
     {
         let event_bus = event_bus.clone();
         let shared_parser = shared_parser.clone();
+        let reader_tx = input_tx;
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
             let mut buf = [0u8; 8192];
@@ -70,8 +72,16 @@ pub async fn spawn_pty(
                     Ok(0) => break,
                     Ok(n) => {
                         let data = buf[..n].to_vec();
-                        if let Ok(mut parser) = shared_parser.lock() {
+                        let da1_queried = if let Ok(mut parser) = shared_parser.lock() {
                             parser.process(&data);
+                            let q = parser.grid.da1_queried;
+                            parser.grid.da1_queried = false;
+                            q
+                        } else {
+                            false
+                        };
+                        if da1_queried {
+                            let _ = reader_tx.blocking_send(b"\x1b[?62;4c".to_vec());
                         }
                         let _ = event_bus.send(ServerEvent::PaneOutput { pane_id, data });
                     }
