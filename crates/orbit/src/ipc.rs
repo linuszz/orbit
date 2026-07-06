@@ -8,10 +8,21 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 fn default_socket_path() -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        return std::path::Path::new(&dir).join("orbit.sock");
-    }
     let uid = unsafe { libc::getuid() };
+
+    let runtime = format!("/run/user/{uid}");
+    let runtime_dir = std::path::Path::new(&runtime);
+    if runtime_dir.exists() {
+        return runtime_dir.join("orbit.sock");
+    }
+
+    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        let p = std::path::Path::new(&dir);
+        if p.exists() {
+            return p.join("orbit.sock");
+        }
+    }
+
     std::env::temp_dir().join(format!("orbit-{uid}.sock"))
 }
 
