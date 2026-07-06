@@ -27,6 +27,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
 
+    if let InputMode::Scroll { offset } = &app.mode {
+        spans.push(Span::styled(
+            format!(" SCROLL  -{offset} "),
+            Style::default()
+                .fg(BG_PRIMARY)
+                .bg(ACCENT_IDLE)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     spans.push(Span::raw(" "));
     spans.push(Span::styled(
         &app.space_name,

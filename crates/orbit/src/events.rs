@@ -69,6 +69,43 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                     .await;
             }
         }
+        InputMode::Scroll { ref mut offset } => {
+            let pane_height = app
+                .panes
+                .get(&app.active_pane)
+                .map(|p| p.parser.grid.rows as usize)
+                .unwrap_or(24);
+            let scrollback_len = app
+                .panes
+                .get(&app.active_pane)
+                .map(|p| p.scrollback.len())
+                .unwrap_or(0);
+            let max_offset = scrollback_len + pane_height;
+
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => *offset = (*offset + 1).min(max_offset),
+                KeyCode::Down | KeyCode::Char('j') => {
+                    *offset = offset.saturating_sub(1);
+                    if *offset == 0 {
+                        app.mode = InputMode::Normal;
+                    }
+                }
+                KeyCode::PageUp => *offset = (*offset + pane_height).min(max_offset),
+                KeyCode::PageDown => {
+                    *offset = offset.saturating_sub(pane_height);
+                    if *offset == 0 {
+                        app.mode = InputMode::Normal;
+                    }
+                }
+                KeyCode::Char('G') => *offset = 0,
+                KeyCode::Char('g') => *offset = max_offset,
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    app.mode = InputMode::Normal;
+                }
+                _ => {}
+            }
+            app.needs_redraw = true;
+        }
         InputMode::Prefix => {
             if is_prefix_key(&key) || key.code == KeyCode::Esc {
                 app.mode = InputMode::Normal;
@@ -110,6 +147,11 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 }
                 KeyCode::Char('a') => {
                     app.agent_panel_visible = !app.agent_panel_visible;
+                }
+                KeyCode::Char('[') => {
+                    app.mode = InputMode::Scroll { offset: 1 };
+                    app.needs_redraw = true;
+                    return;
                 }
                 _ => {}
             }

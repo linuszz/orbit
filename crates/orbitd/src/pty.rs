@@ -78,6 +78,7 @@ pub async fn spawn_pty(
                         let data = buf[..n].to_vec();
                         let da1_queried = if let Ok(mut parser) = shared_parser.lock() {
                             parser.process(&data);
+                            let _ = parser.grid.drain_scrolled_rows();
                             let q = parser.grid.da1_queried;
                             parser.grid.da1_queried = false;
                             q

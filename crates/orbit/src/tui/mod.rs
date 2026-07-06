@@ -16,6 +16,7 @@ use ratatui::{
 use std::io::{self, Stdout};
 
 use crate::app::{App, InputMode, PaneNode, PaneState};
+use orbit_protocol::Cell;
 use theme::*;
 
 pub type OrbitTerminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
@@ -210,12 +211,26 @@ fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App)
     frame.render_widget(title_line, chunks[0]);
 
     if let Some(pane) = app.panes.get(&pane_id) {
-        render_cells(
-            frame,
-            chunks[1],
-            pane,
-            is_active && app.mode == InputMode::Normal,
-        );
+        let scroll_offset = if is_active {
+            if let InputMode::Scroll { offset } = &app.mode {
+                Some(*offset)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(offset) = scroll_offset {
+            render_cells_scrolled(frame, chunks[1], pane, offset);
+        } else {
+            render_cells(
+                frame,
+                chunks[1],
+                pane,
+                is_active && app.mode == InputMode::Normal,
+            );
+        }
     }
 }
 
@@ -262,6 +277,69 @@ fn render_cells(frame: &mut Frame, area: Rect, pane: &PaneState, show_cursor: bo
         if let Some(cell) = frame.buffer_mut().cell_mut((cx, cy)) {
             let s = cell.style();
             cell.set_style(s.fg(Color::Black).bg(Color::White));
+        }
+    }
+}
+
+fn render_cells_scrolled(
+    frame: &mut Frame,
+    area: Rect,
+    pane: &crate::app::PaneState,
+    offset: usize,
+) {
+    let grid = &pane.parser.grid;
+    let height = area.height as usize;
+    let grid_rows = grid.rows as usize;
+    let scrollback_len = pane.scrollback.len();
+    let total = scrollback_len + grid_rows;
+
+    let start = total.saturating_sub(height + offset);
+
+    for display_row in 0..height {
+        let content_idx = start + display_row;
+        let y = area.y + display_row as u16;
+
+        let row_cells: &[Cell] = if content_idx < scrollback_len {
+            &pane.scrollback[content_idx]
+        } else {
+            let gr = content_idx - scrollback_len;
+            if gr < grid_rows {
+                let row_start = gr * grid.cols as usize;
+                &grid.cells[row_start..row_start + grid.cols as usize]
+            } else {
+                continue;
+            }
+        };
+
+        render_row(frame, area.x, y, row_cells, area.width as usize);
+    }
+}
+
+fn render_row(frame: &mut Frame, x: u16, y: u16, cells: &[Cell], max_cols: usize) {
+    for (col, cell) in cells.iter().take(max_cols).enumerate() {
+        if let Some(buf_cell) = frame.buffer_mut().cell_mut((x + col as u16, y)) {
+            let ch = if cell.ch == '\0' { ' ' } else { cell.ch };
+            buf_cell.set_char(ch);
+            let fg = term_color(&cell.fg);
+            let bg = term_color(&cell.bg);
+            let mut style = Style::default().fg(fg).bg(bg);
+            let mut mods = Modifier::empty();
+            if cell.flags.bold() {
+                mods |= Modifier::BOLD;
+            }
+            if cell.flags.italic() {
+                mods |= Modifier::ITALIC;
+            }
+            if cell.flags.underline() {
+                mods |= Modifier::UNDERLINED;
+            }
+            if cell.flags.dim() {
+                mods |= Modifier::DIM;
+            }
+            if !mods.is_empty() {
+                style = style.add_modifier(mods);
+            }
+            buf_cell.set_style(style);
         }
     }
 }

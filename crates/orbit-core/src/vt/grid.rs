@@ -13,6 +13,8 @@ pub struct CellGrid {
 
     pub da1_queried: bool,
 
+    pub scrolled_off_rows: Vec<Vec<Cell>>,
+
     current_fg: TermColor,
     current_bg: TermColor,
     current_bold: bool,
@@ -40,6 +42,7 @@ impl CellGrid {
             scroll_bottom: rows.saturating_sub(1),
             title: None,
             da1_queried: false,
+            scrolled_off_rows: Vec::new(),
             current_fg: TermColor::Default,
             current_bg: TermColor::Default,
             current_bold: false,
@@ -361,6 +364,18 @@ impl CellGrid {
         let top = self.scroll_top as usize;
         let bottom = self.scroll_bottom as usize;
         let cols = self.cols as usize;
+        let full_screen = top == 0 && bottom + 1 == self.rows as usize;
+
+        if full_screen && !self.in_alternate_screen {
+            for r in top..top + n.min(bottom.saturating_sub(top) + 1) {
+                let start = r * cols;
+                if start + cols <= self.cells.len() {
+                    self.scrolled_off_rows
+                        .push(self.cells[start..start + cols].to_vec());
+                }
+            }
+        }
+
         for r in top..=bottom.saturating_sub(n) {
             let src = (r + n) * cols;
             let dst = r * cols;
@@ -372,6 +387,10 @@ impl CellGrid {
                 self.cells[start..start + cols].fill(Cell::default());
             }
         }
+    }
+
+    pub fn drain_scrolled_rows(&mut self) -> Vec<Vec<Cell>> {
+        std::mem::take(&mut self.scrolled_off_rows)
     }
 
     fn scroll_down(&mut self, n: usize) {

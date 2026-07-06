@@ -1,16 +1,39 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use orbit_core::VtParser;
-use orbit_protocol::{FullState, PaneId, ServerEvent, SplitDir};
+use orbit_protocol::{Cell, FullState, PaneId, ServerEvent, SplitDir};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
     Prefix,
+    Scroll { offset: usize },
 }
 
 pub struct PaneState {
     pub parser: VtParser,
+    pub scrollback: VecDeque<Vec<Cell>>,
+}
+
+const SCROLLBACK_CAP: usize = 10_000;
+
+impl PaneState {
+    pub fn new(cols: u16, rows: u16) -> Self {
+        Self {
+            parser: VtParser::new(cols, rows),
+            scrollback: VecDeque::with_capacity(SCROLLBACK_CAP),
+        }
+    }
+
+    pub fn process(&mut self, data: &[u8]) {
+        self.parser.process(data);
+        for row in self.parser.grid.drain_scrolled_rows() {
+            if self.scrollback.len() >= SCROLLBACK_CAP {
+                self.scrollback.pop_front();
+            }
+            self.scrollback.push_back(row);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -100,13 +123,13 @@ impl App {
 
         if let Some(s) = space {
             for pane in &s.panes {
-                let mut parser =
-                    VtParser::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
-                parser.grid.cells = pane.cell_grid.cells.clone();
-                parser.grid.cursor_x = pane.cell_grid.cursor_x;
-                parser.grid.cursor_y = pane.cell_grid.cursor_y;
-                parser.grid.resize(cols, rows);
-                panes.insert(pane.id, PaneState { parser });
+                let mut pane_state =
+                    PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
+                pane_state.parser.grid.cells = pane.cell_grid.cells.clone();
+                pane_state.parser.grid.cursor_x = pane.cell_grid.cursor_x;
+                pane_state.parser.grid.cursor_y = pane.cell_grid.cursor_y;
+                pane_state.parser.grid.resize(cols, rows);
+                panes.insert(pane.id, pane_state);
             }
             if let Some(first_pane) = s.panes.first() {
                 pane_tree = PaneNode::Leaf(first_pane.id);
@@ -154,7 +177,7 @@ impl App {
             ServerEvent::PaneOutput { pane_id, data } => {
                 self.bytes_received += data.len() as u64;
                 if let Some(pane) = self.panes.get_mut(pane_id) {
-                    pane.parser.process(data);
+                    pane.process(data);
                 }
                 self.needs_redraw = true;
             }
@@ -166,9 +189,9 @@ impl App {
 
                 for pane in &info.panes {
                     if !old_ids.contains(&pane.id) {
-                        let parser =
-                            VtParser::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
-                        self.panes.insert(pane.id, PaneState { parser });
+                        let ps =
+                            PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
+                        self.panes.insert(pane.id, ps);
 
                         if let Some((target, dir)) = self.pending_split.take() {
                             self.pane_tree.split_leaf(target, dir, pane.id);
