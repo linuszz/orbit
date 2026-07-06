@@ -64,13 +64,6 @@ async fn main() -> Result<()> {
         })
         .await;
 
-    let _ = ipc
-        .send(&ClientMessage::PaneInput {
-            pane_id,
-            data: b"\x0c".to_vec(),
-        })
-        .await;
-
     debug!("entering event loop (pane: {pane_cols}x{pane_rows})");
     let run_result = events::run(&mut app, ipc, &mut terminal).await;
 
