@@ -130,7 +130,24 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                     Some(Ok(Event::Key(key))) => {
                         handle_key(key, app, &writer).await;
                     }
-                    Some(Ok(Event::Resize(_, _))) => {
+                    Some(Ok(Event::Resize(cols, rows))) => {
+                        let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
+                        let pane_cols = cols.saturating_sub(sidebar_w);
+                        let pane_rows = rows.saturating_sub(3);
+                        app.parser.grid.resize(pane_cols, pane_rows);
+                        let _ = writer
+                            .send(ClientMessage::ResizePane {
+                                pane_id: app.pane_id,
+                                cols: pane_cols,
+                                rows: pane_rows,
+                            })
+                            .await;
+                        let _ = writer
+                            .send(ClientMessage::PaneInput {
+                                pane_id: app.pane_id,
+                                data: b"\x0c".to_vec(),
+                            })
+                            .await;
                         app.needs_redraw = true;
                     }
                     Some(Err(e)) => {

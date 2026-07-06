@@ -34,6 +34,7 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     pub fn apply_snapshot(&mut self, grid: &CellGrid) {
         self.parser.grid.cols = grid.cols;
         self.parser.grid.rows = grid.rows;

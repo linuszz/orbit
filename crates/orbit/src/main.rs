@@ -39,21 +39,25 @@ async fn main() -> Result<()> {
     debug!("setting up terminal...");
     let mut terminal = tui::setup_terminal().context("failed to setup terminal")?;
 
-    let cols = terminal.size()?.width;
-    let rows = terminal.size()?.height;
+    let term_cols = terminal.size()?.width;
+    let term_rows = terminal.size()?.height;
 
-    let mut app = App::new(cols, rows, pane_id);
+    let sidebar_w: u16 = 14;
+    let tab_h: u16 = 1;
+    let title_h: u16 = 1;
+    let status_h: u16 = 1;
+
+    let pane_cols = term_cols.saturating_sub(sidebar_w);
+    let pane_rows = term_rows.saturating_sub(tab_h + title_h + status_h);
+
+    let mut app = App::new(pane_cols, pane_rows, pane_id);
     app.space_name = space.name.clone();
-
-    if let Some(pane_info) = state.spaces.first().and_then(|s| s.panes.first()) {
-        app.apply_snapshot(&pane_info.cell_grid);
-    }
 
     let _ = ipc
         .send(&ClientMessage::ResizePane {
             pane_id,
-            cols: cols.saturating_sub(1),
-            rows: rows.saturating_sub(4),
+            cols: pane_cols,
+            rows: pane_rows,
         })
         .await;
 
@@ -64,7 +68,7 @@ async fn main() -> Result<()> {
         })
         .await;
 
-    debug!("entering event loop");
+    debug!("entering event loop (pane: {pane_cols}x{pane_rows})");
     let run_result = events::run(&mut app, ipc, &mut terminal).await;
 
     debug!("restoring terminal...");
