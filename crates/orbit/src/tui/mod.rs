@@ -108,10 +108,14 @@ fn render_pane(frame: &mut Frame, area: Rect, app: &App) {
     let chunks =
         Layout::vertical([Constraint::Length(PANE_TITLE_HEIGHT), Constraint::Fill(1)]).split(area);
 
-    let title_style = Style::default().fg(FG_MUTED).bg(BG_TERTIARY);
+    let title_style = if app.mode == InputMode::Normal {
+        Style::default().fg(FG_SECONDARY).bg(BG_SECONDARY)
+    } else {
+        Style::default().fg(ACCENT).bg(BG_SECONDARY)
+    };
     let title_line = Line::from(vec![
         Span::raw(" "),
-        Span::styled(&app.space_name, Style::default().fg(FG_SECONDARY)),
+        Span::styled("~", Style::default().fg(ACCENT_IDLE)),
         Span::raw(" "),
     ]);
     frame.render_widget(

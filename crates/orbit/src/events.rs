@@ -61,37 +61,37 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                     .await;
             }
         }
-        InputMode::Prefix => match key.code {
-            KeyCode::Char('x') => {
-                debug!("close pane requested");
-                let _ = writer
-                    .send(ClientMessage::ClosePane {
-                        pane_id: app.pane_id,
-                    })
-                    .await;
-                app.should_quit = true;
-            }
-            KeyCode::Char('d') => {
-                debug!("detach requested");
-                app.should_quit = true;
-            }
-            KeyCode::Char('b') => {
-                app.sidebar_visible = !app.sidebar_visible;
-                app.needs_redraw = true;
-            }
-            KeyCode::Char('a') => {
-                app.agent_panel_visible = !app.agent_panel_visible;
-                app.needs_redraw = true;
-            }
-            KeyCode::Esc => {
+        InputMode::Prefix => {
+            if is_prefix_key(&key) || key.code == KeyCode::Esc {
                 app.mode = InputMode::Normal;
                 app.needs_redraw = true;
+                return;
             }
-            _ => {
-                app.mode = InputMode::Normal;
-                app.needs_redraw = true;
+            match key.code {
+                KeyCode::Char('x') => {
+                    debug!("close pane requested");
+                    let _ = writer
+                        .send(ClientMessage::ClosePane {
+                            pane_id: app.pane_id,
+                        })
+                        .await;
+                    app.should_quit = true;
+                }
+                KeyCode::Char('d') => {
+                    debug!("detach requested");
+                    app.should_quit = true;
+                }
+                KeyCode::Char('b') => {
+                    app.sidebar_visible = !app.sidebar_visible;
+                }
+                KeyCode::Char('a') => {
+                    app.agent_panel_visible = !app.agent_panel_visible;
+                }
+                _ => {}
             }
-        },
+            app.mode = InputMode::Normal;
+            app.needs_redraw = true;
+        }
     }
 }
 
