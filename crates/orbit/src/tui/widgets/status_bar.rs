@@ -39,6 +39,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     spans.push(Span::styled("○ idle", Style::default().fg(ACCENT_IDLE)));
 
+    spans.push(Span::styled(
+        format!(" | recv:{}", app.bytes_received),
+        Style::default().fg(FG_MUTED),
+    ));
+
     let line = Line::from(spans);
     frame.render_widget(line, area);
 }

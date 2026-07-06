@@ -43,15 +43,18 @@ async fn main() -> Result<()> {
     let term_rows = terminal.size()?.height;
 
     let sidebar_w: u16 = 14;
-    let tab_h: u16 = 1;
-    let title_h: u16 = 1;
-    let status_h: u16 = 1;
+    let overhead_rows: u16 = 3;
 
-    let pane_cols = term_cols.saturating_sub(sidebar_w);
-    let pane_rows = term_rows.saturating_sub(tab_h + title_h + status_h);
+    let pane_cols = term_cols.saturating_sub(sidebar_w).max(20);
+    let pane_rows = term_rows.saturating_sub(overhead_rows).max(5);
 
     let mut app = App::new(pane_cols, pane_rows, pane_id);
     app.space_name = space.name.clone();
+
+    if let Some(pane_info) = state.spaces.first().and_then(|s| s.panes.first()) {
+        app.apply_snapshot(&pane_info.cell_grid);
+        app.parser.grid.resize(pane_cols, pane_rows);
+    }
 
     let _ = ipc
         .send(&ClientMessage::ResizePane {

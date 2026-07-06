@@ -17,6 +17,7 @@ pub struct App {
     pub sidebar_visible: bool,
     pub agent_panel_visible: bool,
     pub space_name: String,
+    pub bytes_received: u64,
 }
 
 impl App {
@@ -31,6 +32,7 @@ impl App {
             sidebar_visible: true,
             agent_panel_visible: false,
             space_name: "default".to_string(),
+            bytes_received: 0,
         }
     }
 
@@ -47,6 +49,7 @@ impl App {
     pub fn handle_server_event(&mut self, event: &ServerEvent) {
         match event {
             ServerEvent::PaneOutput { data, .. } => {
+                self.bytes_received += data.len() as u64;
                 self.parser.process(data);
                 self.needs_redraw = true;
             }
