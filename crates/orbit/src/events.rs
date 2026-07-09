@@ -1,5 +1,7 @@
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
+};
 use futures::StreamExt;
 use orbit_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
@@ -246,6 +248,47 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                                 .await;
                         }
                         app.needs_redraw = true;
+                    }
+                    Some(Ok(Event::Mouse(mouse))) => {
+                        match mouse.kind {
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
+                                let agent_w: u16 = if app.agent_panel_visible { 22 } else { 0 };
+                                let pane_area = ratatui::layout::Rect {
+                                    x: sidebar_w,
+                                    y: 1,
+                                    width: terminal.size().unwrap_or_default().width.saturating_sub(sidebar_w + agent_w),
+                                    height: terminal.size().unwrap_or_default().height.saturating_sub(3),
+                                };
+                                let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+                                for (pid, rect) in &areas {
+                                    if mouse.column >= rect.x
+                                        && mouse.column < rect.x + rect.width
+                                        && mouse.row >= rect.y
+                                        && mouse.row < rect.y + rect.height
+                                    {
+                                        app.active_pane = *pid;
+                                        let _ = writer.send(ClientMessage::FocusPane { pane_id: *pid }).await;
+                                        app.needs_redraw = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            MouseEventKind::ScrollUp => {
+                                if let InputMode::Scroll { offset } = &mut app.mode {
+                                    *offset += 3;
+                                    app.needs_redraw = true;
+                                }
+                            }
+                            MouseEventKind::ScrollDown => {
+                                if let InputMode::Scroll { offset } = &mut app.mode {
+                                    *offset = offset.saturating_sub(3);
+                                    if *offset == 0 { app.mode = InputMode::Normal; }
+                                    app.needs_redraw = true;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     Some(Err(e)) => debug!("event stream error: {e}"),
                     None => break,

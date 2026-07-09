@@ -2,6 +2,7 @@ pub mod theme;
 pub mod widgets;
 
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -24,13 +25,17 @@ pub type OrbitTerminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 pub fn setup_terminal() -> io::Result<OrbitTerminal> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     ratatui::Terminal::new(CrosstermBackend::new(stdout))
 }
 
 pub fn restore_terminal(terminal: &mut OrbitTerminal) -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     Ok(())
 }
 
