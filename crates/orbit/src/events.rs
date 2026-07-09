@@ -46,6 +46,11 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
 async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
     match app.mode {
         InputMode::Normal => {
+            if app.show_help {
+                app.show_help = false;
+                app.needs_redraw = true;
+                return;
+            }
             if is_prefix_key(&key) {
                 app.mode = InputMode::Prefix;
                 app.needs_redraw = true;
@@ -167,6 +172,10 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 }
                 KeyCode::Char('p') => {
                     app.prev_tab();
+                }
+                KeyCode::Char('?') => {
+                    app.show_help = !app.show_help;
+                    return;
                 }
                 _ => {}
             }

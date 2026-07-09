@@ -120,6 +120,7 @@ pub struct App {
     pub server_connected: bool,
     pub sidebar_visible: bool,
     pub agent_panel_visible: bool,
+    pub show_help: bool,
     pub space_name: String,
 }
 
@@ -161,6 +162,7 @@ impl App {
             server_connected: true,
             sidebar_visible: true,
             agent_panel_visible: false,
+            show_help: false,
             space_name: space
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| "default".to_string()),

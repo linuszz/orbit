@@ -88,6 +88,103 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.agent_panel_visible {
         widgets::agent_monitor::render(frame, cols[2], app);
     }
+
+    if app.show_help {
+        render_help_overlay(frame, area);
+    }
+}
+
+fn render_help_overlay(frame: &mut Frame, area: Rect) {
+    let dim = Block::default().style(Style::default().bg(Color::Rgb(10, 10, 14)));
+    frame.render_widget(dim, area);
+
+    let help_w = 48u16.min(area.width.saturating_sub(4));
+    let help_h = 18u16.min(area.height.saturating_sub(4));
+    let x = area.x + (area.width - help_w) / 2;
+    let y = area.y + (area.height - help_h) / 2;
+    let help_area = Rect {
+        x,
+        y,
+        width: help_w,
+        height: help_h,
+    };
+
+    let block = Block::default()
+        .style(Style::default().bg(BG_SECONDARY).fg(FG_PRIMARY))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(BORDER));
+    frame.render_widget(block, help_area);
+
+    let lines = vec![
+        ("Ctrl+B", "prefix key (enter command mode)"),
+        ("  h", "split pane horizontal (left|right)"),
+        ("  v", "split pane vertical (top/bottom)"),
+        ("  c", "new tab"),
+        ("  n / p", "next / previous tab"),
+        ("  [", "enter scroll mode"),
+        ("  x", "close current pane"),
+        ("  d", "detach (quit, keep session)"),
+        ("  b", "toggle sidebar"),
+        ("  a", "toggle agent monitor"),
+        ("  ?", "this help"),
+        ("Tab", "cycle focus between panes"),
+        ("Scroll: k/j/PgUp/PgDn/g/G/q", ""),
+    ];
+
+    let mut y_off = 1u16;
+    let title = ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+        " Orbit — Keyboard Reference ",
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+    )]);
+    frame.render_widget(
+        title,
+        Rect {
+            x: help_area.x + 1,
+            y: help_area.y + y_off,
+            width: help_w - 2,
+            height: 1,
+        },
+    );
+    y_off += 2;
+
+    for (key, desc) in &lines {
+        let line = if desc.is_empty() {
+            ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+                *key,
+                Style::default().fg(ACCENT_IDLE),
+            )])
+        } else {
+            ratatui::text::Line::from(vec![
+                ratatui::text::Span::styled(format!(" {:<14}", key), Style::default().fg(ACCENT)),
+                ratatui::text::Span::styled(*desc, Style::default().fg(FG_SECONDARY)),
+            ])
+        };
+        frame.render_widget(
+            line,
+            Rect {
+                x: help_area.x + 1,
+                y: help_area.y + y_off,
+                width: help_w - 2,
+                height: 1,
+            },
+        );
+        y_off += 1;
+    }
+
+    y_off += 1;
+    let hint = ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+        " Press any key to close ",
+        Style::default().fg(FG_MUTED),
+    )]);
+    frame.render_widget(
+        hint,
+        Rect {
+            x: help_area.x + 1,
+            y: help_area.y + y_off,
+            width: help_w - 2,
+            height: 1,
+        },
+    );
 }
 
 pub fn compute_leaf_areas(node: &PaneNode, area: Rect) -> Vec<(PaneId, Rect)> {
