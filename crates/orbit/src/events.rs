@@ -196,7 +196,31 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                     Some(Ok(Event::Key(key))) => {
                         handle_key(key, app, &writer).await;
                     }
-                    Some(Ok(Event::Resize(_, _))) => {
+                    Some(Ok(Event::Resize(cols, rows))) => {
+                        let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
+                        let total_cols = cols.saturating_sub(sidebar_w).max(20);
+                        let total_rows = rows.saturating_sub(3).max(5);
+                        let pane_area = ratatui::layout::Rect {
+                            x: 0,
+                            y: 0,
+                            width: total_cols,
+                            height: total_rows,
+                        };
+                        let areas = crate::tui::compute_leaf_areas(&app.pane_tree, pane_area);
+                        for (pid, rect) in areas {
+                            let pc = rect.width;
+                            let pr = rect.height.saturating_sub(1);
+                            if let Some(pane) = app.panes.get_mut(&pid) {
+                                pane.parser.grid.resize(pc, pr);
+                            }
+                            let _ = writer
+                                .send(ClientMessage::ResizePane {
+                                    pane_id: pid,
+                                    cols: pc,
+                                    rows: pr,
+                                })
+                                .await;
+                        }
                         app.needs_redraw = true;
                     }
                     Some(Err(e)) => debug!("event stream error: {e}"),

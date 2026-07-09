@@ -31,17 +31,29 @@ async fn main() -> Result<()> {
     let term_rows = terminal.size()?.height;
 
     let sidebar_w: u16 = 14;
-    let pane_cols = term_cols.saturating_sub(sidebar_w).max(20);
-    let pane_rows = term_rows.saturating_sub(3).max(5);
+    let total_cols = term_cols.saturating_sub(sidebar_w).max(20);
+    let total_rows = term_rows.saturating_sub(3).max(5);
 
-    let mut app = App::from_welcome(&state, pane_cols, pane_rows);
+    let mut app = App::from_welcome(&state, total_cols, total_rows);
 
-    for &pid in &app.pane_tree.leaves() {
+    let pane_area = ratatui::layout::Rect {
+        x: 0,
+        y: 0,
+        width: total_cols,
+        height: total_rows,
+    };
+    let areas = tui::compute_leaf_areas(&app.pane_tree, pane_area);
+    for (pid, rect) in areas {
+        let pc = rect.width;
+        let pr = rect.height.saturating_sub(1);
+        if let Some(pane) = app.panes.get_mut(&pid) {
+            pane.parser.grid.resize(pc, pr);
+        }
         let _ = ipc
             .send(&ClientMessage::ResizePane {
                 pane_id: pid,
-                cols: pane_cols,
-                rows: pane_rows,
+                cols: pc,
+                rows: pr,
             })
             .await;
     }

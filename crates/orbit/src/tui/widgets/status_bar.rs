@@ -49,8 +49,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     spans.push(Span::styled("○ idle", Style::default().fg(ACCENT_IDLE)));
 
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let hh = (secs / 3600 % 24) as u8;
+    let mm = (secs / 60 % 60) as u8;
     spans.push(Span::styled(
-        format!(" | recv:{}", app.bytes_received),
+        format!(" | {hh:02}:{mm:02}"),
         Style::default().fg(FG_MUTED),
     ));
 

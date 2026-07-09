@@ -90,6 +90,22 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
+pub fn compute_leaf_areas(node: &PaneNode, area: Rect) -> Vec<(PaneId, Rect)> {
+    match node {
+        PaneNode::Leaf(pid) => vec![(*pid, area)],
+        PaneNode::Split {
+            direction,
+            first,
+            second,
+        } => {
+            let (first_area, _sep, second_area) = split_area(area, direction);
+            let mut v = compute_leaf_areas(first, first_area);
+            v.extend(compute_leaf_areas(second, second_area));
+            v
+        }
+    }
+}
+
 fn render_pane_tree(frame: &mut Frame, area: Rect, node: &PaneNode, app: &App) {
     match node {
         PaneNode::Leaf(pid) => {
@@ -183,6 +199,13 @@ fn render_separator(frame: &mut Frame, area: Rect, dir: SplitDir) {
 
 fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App) {
     let is_active = pane_id == app.active_pane;
+    let pane_idx = app
+        .pane_tree
+        .leaves()
+        .iter()
+        .position(|&p| p == pane_id)
+        .map(|i| i + 1)
+        .unwrap_or(1);
 
     let chunks = ratatui::layout::Layout::vertical([
         ratatui::layout::Constraint::Length(1),
@@ -200,7 +223,11 @@ fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App)
         .border_style(Style::default().fg(border_color));
     frame.render_widget(title_block, chunks[0]);
 
-    let label = if is_active { "~ *" } else { "~" };
+    let label = if is_active {
+        format!("{pane_idx}:~ *")
+    } else {
+        format!("{pane_idx}:~")
+    };
     let title_line = ratatui::text::Line::from(vec![
         ratatui::text::Span::raw(" "),
         ratatui::text::Span::styled(
