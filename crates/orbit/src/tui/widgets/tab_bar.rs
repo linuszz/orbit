@@ -15,15 +15,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(BORDER));
     frame.render_widget(bg, area);
 
-    let mut spans = vec![
-        Span::raw(" "),
-        Span::styled(
-            "dev",
-            Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-        Span::raw("  "),
-    ];
+    let mut spans = vec![Span::raw(" ")];
+
+    for (i, tab) in app.tabs.iter().enumerate() {
+        if i == app.active_tab {
+            spans.push(Span::styled(
+                &tab.name,
+                Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(" ", Style::default()));
+        } else {
+            spans.push(Span::styled(&tab.name, Style::default().fg(FG_MUTED)));
+            spans.push(Span::raw("  "));
+        }
+    }
+
+    spans.push(Span::raw("  "));
 
     let agent_color = if app.agent_panel_visible {
         ACCENT

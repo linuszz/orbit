@@ -100,11 +100,20 @@ impl PaneNode {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Tab {
+    pub name: String,
+    pub pane_tree: PaneNode,
+}
+
 pub struct App {
     pub panes: HashMap<PaneId, PaneState>,
-    pub pane_tree: PaneNode,
+    pub tabs: Vec<Tab>,
+    pub active_tab: usize,
     pub active_pane: PaneId,
     pub pending_split: Option<(PaneId, SplitDir)>,
+    pub pending_new_tab: bool,
+    pub tab_counter: usize,
     pub mode: InputMode,
     pub should_quit: bool,
     pub needs_redraw: bool,
@@ -112,40 +121,40 @@ pub struct App {
     pub sidebar_visible: bool,
     pub agent_panel_visible: bool,
     pub space_name: String,
-    pub bytes_received: u64,
 }
 
 impl App {
     pub fn from_welcome(state: &FullState, cols: u16, rows: u16) -> Self {
         let space = state.spaces.first();
         let mut panes = HashMap::new();
-        let mut pane_tree = PaneNode::Leaf(PaneId(0));
 
         if let Some(s) = space {
             for pane in &s.panes {
-                let mut pane_state =
-                    PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
-                pane_state.parser.grid.cells = pane.cell_grid.cells.clone();
-                pane_state.parser.grid.cursor_x = pane.cell_grid.cursor_x;
-                pane_state.parser.grid.cursor_y = pane.cell_grid.cursor_y;
-                pane_state.parser.grid.resize(cols, rows);
-                panes.insert(pane.id, pane_state);
-            }
-            if let Some(first_pane) = s.panes.first() {
-                pane_tree = PaneNode::Leaf(first_pane.id);
+                let mut ps = PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
+                ps.parser.grid.cells = pane.cell_grid.cells.clone();
+                ps.parser.grid.cursor_x = pane.cell_grid.cursor_x;
+                ps.parser.grid.cursor_y = pane.cell_grid.cursor_y;
+                ps.parser.grid.resize(cols, rows);
+                panes.insert(pane.id, ps);
             }
         }
 
-        let active_pane = space
+        let first_pane = space
             .and_then(|s| s.panes.first())
             .map(|p| p.id)
             .unwrap_or(PaneId(0));
 
         Self {
             panes,
-            pane_tree,
-            active_pane,
+            tabs: vec![Tab {
+                name: "dev".to_string(),
+                pane_tree: PaneNode::Leaf(first_pane),
+            }],
+            active_tab: 0,
+            active_pane: first_pane,
             pending_split: None,
+            pending_new_tab: false,
+            tab_counter: 1,
             mode: InputMode::Normal,
             should_quit: false,
             needs_redraw: true,
@@ -155,12 +164,19 @@ impl App {
             space_name: space
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| "default".to_string()),
-            bytes_received: 0,
         }
     }
 
+    pub fn pane_tree(&self) -> &PaneNode {
+        &self.tabs[self.active_tab].pane_tree
+    }
+
+    pub fn current_tab_name(&self) -> &str {
+        &self.tabs[self.active_tab].name
+    }
+
     pub fn cycle_focus(&mut self) {
-        let leaves = self.pane_tree.leaves();
+        let leaves = self.pane_tree().leaves();
         if leaves.len() < 2 {
             return;
         }
@@ -172,14 +188,41 @@ impl App {
         self.needs_redraw = true;
     }
 
+    pub fn next_tab(&mut self) {
+        if self.tabs.len() > 1 {
+            self.active_tab = (self.active_tab + 1) % self.tabs.len();
+            let leaves = self.pane_tree().leaves();
+            if let Some(&first) = leaves.first() {
+                self.active_pane = first;
+            }
+            self.needs_redraw = true;
+        }
+    }
+
+    pub fn prev_tab(&mut self) {
+        if self.tabs.len() > 1 {
+            self.active_tab = (self.active_tab + self.tabs.len() - 1) % self.tabs.len();
+            let leaves = self.pane_tree().leaves();
+            if let Some(&first) = leaves.first() {
+                self.active_pane = first;
+            }
+            self.needs_redraw = true;
+        }
+    }
+
+    pub fn pane_in_current_tab(&self, pane_id: PaneId) -> bool {
+        self.pane_tree().leaves().contains(&pane_id)
+    }
+
     pub fn handle_server_event(&mut self, event: &ServerEvent) {
         match event {
             ServerEvent::PaneOutput { pane_id, data } => {
-                self.bytes_received += data.len() as u64;
                 if let Some(pane) = self.panes.get_mut(pane_id) {
                     pane.process(data);
                 }
-                self.needs_redraw = true;
+                if self.pane_in_current_tab(*pane_id) {
+                    self.needs_redraw = true;
+                }
             }
             ServerEvent::SpaceUpdated(info) => {
                 let old_ids: std::collections::HashSet<PaneId> =
@@ -193,8 +236,20 @@ impl App {
                             PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
                         self.panes.insert(pane.id, ps);
 
-                        if let Some((target, dir)) = self.pending_split.take() {
-                            self.pane_tree.split_leaf(target, dir, pane.id);
+                        if self.pending_new_tab {
+                            self.pending_new_tab = false;
+                            self.tab_counter += 1;
+                            self.tabs.push(Tab {
+                                name: format!("tab{}", self.tab_counter),
+                                pane_tree: PaneNode::Leaf(pane.id),
+                            });
+                            self.active_tab = self.tabs.len() - 1;
+                            self.active_pane = pane.id;
+                        } else if let Some((target, dir)) = self.pending_split.take() {
+                            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                                tab.pane_tree.split_leaf(target, dir, pane.id);
+                            }
+                            self.active_pane = pane.id;
                         }
                     }
                 }
@@ -202,12 +257,22 @@ impl App {
                 for &id in old_ids.iter() {
                     if !new_ids.contains(&id) {
                         self.panes.remove(&id);
-                        self.pane_tree.remove_leaf(id);
+                        for tab in &mut self.tabs {
+                            tab.pane_tree.remove_leaf(id);
+                        }
                     }
                 }
 
-                self.active_pane = info.active_pane;
-                if self.pane_tree.leaves().is_empty() {
+                self.tabs.retain(|t| !t.pane_tree.leaves().is_empty());
+                if self.active_tab >= self.tabs.len() {
+                    self.active_tab = self.tabs.len().saturating_sub(1);
+                }
+
+                if !info.panes.is_empty() {
+                    self.active_pane = info.active_pane;
+                }
+
+                if self.tabs.is_empty() {
                     self.should_quit = true;
                 }
                 self.needs_redraw = true;

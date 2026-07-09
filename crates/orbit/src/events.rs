@@ -51,7 +51,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 app.needs_redraw = true;
                 return;
             }
-            if key.code == KeyCode::Tab && app.pane_tree.leaves().len() > 1 {
+            if key.code == KeyCode::Tab && app.pane_tree().leaves().len() > 1 {
                 app.cycle_focus();
                 let _ = writer
                     .send(ClientMessage::FocusPane {
@@ -114,7 +114,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
             }
             match key.code {
                 KeyCode::Char('x') => {
-                    let leaves = app.pane_tree.leaves();
+                    let leaves = app.pane_tree().leaves();
                     let pane_id = app.active_pane;
                     if leaves.len() <= 1 {
                         app.should_quit = true;
@@ -152,6 +152,21 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                     app.mode = InputMode::Scroll { offset: 1 };
                     app.needs_redraw = true;
                     return;
+                }
+                KeyCode::Char('c') => {
+                    app.pending_new_tab = true;
+                    let _ = writer
+                        .send(ClientMessage::SplitPane {
+                            pane_id: app.active_pane,
+                            direction: SplitDir::Horizontal,
+                        })
+                        .await;
+                }
+                KeyCode::Char('n') => {
+                    app.next_tab();
+                }
+                KeyCode::Char('p') => {
+                    app.prev_tab();
                 }
                 _ => {}
             }
@@ -206,7 +221,7 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                             width: total_cols,
                             height: total_rows,
                         };
-                        let areas = crate::tui::compute_leaf_areas(&app.pane_tree, pane_area);
+                        let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
                         for (pid, rect) in areas {
                             let pc = rect.width;
                             let pr = rect.height.saturating_sub(1);

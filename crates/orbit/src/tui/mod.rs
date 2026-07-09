@@ -82,7 +82,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     .split(right);
 
     widgets::tab_bar::render(frame, rows[0], app);
-    render_pane_tree(frame, rows[1], &app.pane_tree, app);
+    render_pane_tree(frame, rows[1], app.pane_tree(), app);
     widgets::status_bar::render(frame, rows[2], app);
 
     if app.agent_panel_visible {
@@ -200,7 +200,7 @@ fn render_separator(frame: &mut Frame, area: Rect, dir: SplitDir) {
 fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App) {
     let is_active = pane_id == app.active_pane;
     let pane_idx = app
-        .pane_tree
+        .pane_tree()
         .leaves()
         .iter()
         .position(|&p| p == pane_id)

@@ -44,7 +44,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ));
     spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
 
-    spans.push(Span::styled("dev*", Style::default().fg(FG_MUTED)));
+    spans.push(Span::styled(
+        app.current_tab_name(),
+        Style::default().fg(FG_MUTED),
+    ));
+    spans.push(Span::styled("*", Style::default().fg(ACCENT)));
     spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
 
     spans.push(Span::styled("○ idle", Style::default().fg(ACCENT_IDLE)));
