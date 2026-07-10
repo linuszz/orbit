@@ -147,7 +147,36 @@ pub struct App {
     pub sidebar_visible: bool,
     pub agent_panel_visible: bool,
     pub show_help: bool,
+    pub context_menu: Option<ContextMenu>,
     pub space_name: String,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum ContextMenuTarget {
+    Pane(PaneId),
+    Space,
+    Sidebar,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContextMenu {
+    pub x: u16,
+    pub y: u16,
+    #[allow(dead_code)]
+    pub target: ContextMenuTarget,
+    pub items: Vec<ContextMenuItem>,
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum ContextMenuItem {
+    Action {
+        label: String,
+        shortcut: String,
+        id: &'static str,
+    },
+    Separator,
 }
 
 impl App {
@@ -193,6 +222,7 @@ impl App {
             sidebar_visible: true,
             agent_panel_visible: false,
             show_help: false,
+            context_menu: None,
             space_name: space
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| "default".to_string()),
@@ -244,6 +274,76 @@ impl App {
 
     pub fn pane_in_current_tab(&self, pane_id: PaneId) -> bool {
         self.pane_tree().leaves().contains(&pane_id)
+    }
+
+    pub fn open_context_menu(&mut self, x: u16, y: u16, target: ContextMenuTarget) {
+        let items = match &target {
+            ContextMenuTarget::Pane(_) => vec![
+                ContextMenuItem::Action {
+                    label: "Split Horizontal".into(),
+                    shortcut: "h".into(),
+                    id: "split_h",
+                },
+                ContextMenuItem::Action {
+                    label: "Split Vertical".into(),
+                    shortcut: "v".into(),
+                    id: "split_v",
+                },
+                ContextMenuItem::Separator,
+                ContextMenuItem::Action {
+                    label: "Close Pane".into(),
+                    shortcut: "x".into(),
+                    id: "close_pane",
+                },
+                ContextMenuItem::Action {
+                    label: "Maximize Pane".into(),
+                    shortcut: "z".into(),
+                    id: "maximize",
+                },
+            ],
+            ContextMenuTarget::Space => vec![
+                ContextMenuItem::Action {
+                    label: "Rename".into(),
+                    shortcut: "r".into(),
+                    id: "rename_space",
+                },
+                ContextMenuItem::Separator,
+                ContextMenuItem::Action {
+                    label: "Move Up".into(),
+                    shortcut: "".into(),
+                    id: "move_up",
+                },
+                ContextMenuItem::Action {
+                    label: "Move Down".into(),
+                    shortcut: "".into(),
+                    id: "move_down",
+                },
+                ContextMenuItem::Separator,
+                ContextMenuItem::Action {
+                    label: "Close".into(),
+                    shortcut: "".into(),
+                    id: "close_space",
+                },
+            ],
+            ContextMenuTarget::Sidebar => vec![ContextMenuItem::Action {
+                label: "New Space".into(),
+                shortcut: "".into(),
+                id: "new_space",
+            }],
+        };
+        self.context_menu = Some(ContextMenu {
+            x,
+            y,
+            target,
+            items,
+            selected: 0,
+        });
+        self.needs_redraw = true;
+    }
+
+    pub fn close_context_menu(&mut self) {
+        self.context_menu = None;
+        self.needs_redraw = true;
     }
 
     pub fn handle_server_event(&mut self, event: &ServerEvent) {

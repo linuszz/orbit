@@ -99,6 +99,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_help_overlay(frame, area);
     }
 
+    if app.context_menu.is_some() {
+        widgets::context_menu::render(frame, area, app);
+    }
+
     if matches!(app.mode, crate::app::InputMode::CommandPalette { .. }) {
         widgets::command_palette::render(frame, area, app);
     }

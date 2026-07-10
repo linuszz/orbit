@@ -6,7 +6,7 @@ use futures::StreamExt;
 use orbit_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
 
-use crate::app::{App, InputMode, COMMANDS};
+use crate::app::{App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
 use crate::ipc::{IpcClient, IpcWriter};
 use crate::tui::{render, OrbitTerminal};
 
@@ -87,6 +87,9 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
                 })
                 .await;
         }
+        "scroll_mode" => {
+            app.mode = InputMode::Scroll { offset: 1 };
+        }
         "new_tab" => {
             app.pending_new_tab = true;
             let _ = writer
@@ -98,9 +101,6 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
         }
         "next_tab" => app.next_tab(),
         "prev_tab" => app.prev_tab(),
-        "scroll_mode" => {
-            app.mode = InputMode::Scroll { offset: 1 };
-        }
         "toggle_sidebar" => app.sidebar_visible = !app.sidebar_visible,
         "toggle_agent" => app.agent_panel_visible = !app.agent_panel_visible,
         "detach" => app.should_quit = true,
@@ -110,10 +110,51 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
     app.needs_redraw = true;
 }
 
+async fn execute_context_action(id: &str, app: &mut App, writer: &IpcWriter) {
+    match id {
+        "split_h" => {
+            app.pending_split = Some((app.active_pane, SplitDir::Horizontal));
+            let _ = writer
+                .send(ClientMessage::SplitPane {
+                    pane_id: app.active_pane,
+                    direction: SplitDir::Horizontal,
+                })
+                .await;
+        }
+        "split_v" => {
+            app.pending_split = Some((app.active_pane, SplitDir::Vertical));
+            let _ = writer
+                .send(ClientMessage::SplitPane {
+                    pane_id: app.active_pane,
+                    direction: SplitDir::Vertical,
+                })
+                .await;
+        }
+        "close_pane" => {
+            if app.pane_tree().leaves().len() <= 1 {
+                app.should_quit = true;
+            }
+            let _ = writer
+                .send(ClientMessage::ClosePane {
+                    pane_id: app.active_pane,
+                })
+                .await;
+        }
+        "maximize" | "move_up" | "move_down" | "rename_space" | "close_space" | "new_space" => {}
+        _ => {}
+    }
+    app.needs_redraw = true;
+}
+
 async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
     if app.show_help {
         app.show_help = false;
         app.needs_redraw = true;
+        return;
+    }
+
+    if app.context_menu.is_some() && key.code == KeyCode::Esc {
+        app.close_context_menu();
         return;
     }
 
@@ -302,46 +343,9 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                         app.needs_redraw = true;
                     }
                     Some(Ok(Event::Mouse(mouse))) => {
-                        match mouse.kind {
-                            MouseEventKind::Down(MouseButton::Left) => {
-                                let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
-                                let agent_w: u16 = if app.agent_panel_visible { 22 } else { 0 };
-                                let term = terminal.size().unwrap_or_default();
-                                let pane_area = ratatui::layout::Rect {
-                                    x: sidebar_w,
-                                    y: 1,
-                                    width: term.width.saturating_sub(sidebar_w + agent_w),
-                                    height: term.height.saturating_sub(3),
-                                };
-                                let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
-                                for (pid, rect) in &areas {
-                                    if mouse.column >= rect.x
-                                        && mouse.column < rect.x + rect.width
-                                        && mouse.row >= rect.y
-                                        && mouse.row < rect.y + rect.height
-                                    {
-                                        app.active_pane = *pid;
-                                        let _ = writer.send(ClientMessage::FocusPane { pane_id: *pid }).await;
-                                        app.needs_redraw = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            MouseEventKind::ScrollUp => {
-                                if let InputMode::Scroll { offset } = &mut app.mode {
-                                    *offset += 3;
-                                    app.needs_redraw = true;
-                                }
-                            }
-                            MouseEventKind::ScrollDown => {
-                                if let InputMode::Scroll { offset } = &mut app.mode {
-                                    *offset = offset.saturating_sub(3);
-                                    if *offset == 0 { app.mode = InputMode::Normal; }
-                                    app.needs_redraw = true;
-                                }
-                            }
-                            _ => {}
-                        }
+                        let term_size = terminal.size().unwrap_or_default();
+                        let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
+                        handle_mouse(mouse, app, &writer, term_rect).await;
                     }
                     Some(Err(e)) => debug!("event stream error: {e}"),
                     None => break,
@@ -352,4 +356,189 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
     }
 
     Ok(())
+}
+
+async fn handle_mouse(
+    mouse: crossterm::event::MouseEvent,
+    app: &mut App,
+    writer: &IpcWriter,
+    term_size: ratatui::layout::Rect,
+) {
+    if let Some(menu) = app.context_menu.clone() {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let menu_y = menu.y;
+                for (i, item) in menu.items.iter().enumerate() {
+                    if let ContextMenuItem::Action { .. } = item {
+                        if mouse.row == menu_y + i as u16
+                            && mouse.column >= menu.x
+                            && mouse.column < menu.x + 24
+                        {
+                            if let Some(ContextMenuItem::Action { id, .. }) =
+                                menu.items.get(menu.selected)
+                            {
+                                let id = *id;
+                                app.context_menu = None;
+                                app.needs_redraw = true;
+                                execute_context_action(id, app, writer).await;
+                            }
+                            return;
+                        }
+                    }
+                }
+                app.close_context_menu();
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                app.close_context_menu();
+            }
+            MouseEventKind::Moved => {
+                let menu_y = menu.y;
+                let mut new_selected = 0;
+                for (i, item) in menu.items.iter().enumerate() {
+                    if mouse.row == menu_y + i as u16
+                        && mouse.column >= menu.x
+                        && mouse.column < menu.x + 24
+                    {
+                        if let ContextMenuItem::Action { .. } = item {
+                            new_selected = i;
+                        }
+                    }
+                }
+                if let Some(ref mut m) = app.context_menu {
+                    m.selected = new_selected;
+                }
+                app.needs_redraw = true;
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
+    let agent_w: u16 = if app.agent_panel_visible { 22 } else { 0 };
+    let term_w = term_size.width;
+    let term_h = term_size.height;
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if mouse.row == 1 {
+                if app.sidebar_visible && mouse.column < sidebar_w {
+                    return;
+                }
+                let tab_x_start = sidebar_w + 1;
+                if mouse.column >= tab_x_start {
+                    let mut x = tab_x_start;
+                    for (i, tab) in app.tabs.iter().enumerate() {
+                        let label_len = tab.name.len() as u16 + 3;
+                        if mouse.column >= x && mouse.column < x + label_len {
+                            app.active_tab = i;
+                            if let Some(&first) = app.pane_tree().leaves().first() {
+                                app.active_pane = first;
+                            }
+                            app.needs_redraw = true;
+                            return;
+                        }
+                        x += label_len;
+                    }
+                    if mouse.column >= x && mouse.column < x + 3 {
+                        app.pending_new_tab = true;
+                        let _ = writer
+                            .send(ClientMessage::SplitPane {
+                                pane_id: app.active_pane,
+                                direction: SplitDir::Horizontal,
+                            })
+                            .await;
+                        app.needs_redraw = true;
+                        return;
+                    }
+                    if mouse.column >= term_w.saturating_sub(14) {
+                        app.agent_panel_visible = !app.agent_panel_visible;
+                        app.needs_redraw = true;
+                        return;
+                    }
+                }
+                if app.sidebar_visible && mouse.column < sidebar_w && mouse.row == 0 {
+                    app.sidebar_visible = false;
+                    app.needs_redraw = true;
+                    return;
+                }
+            }
+
+            if app.sidebar_visible && mouse.column < sidebar_w {
+                return;
+            }
+
+            let pane_area = ratatui::layout::Rect {
+                x: sidebar_w,
+                y: 1,
+                width: term_w.saturating_sub(sidebar_w + agent_w),
+                height: term_h.saturating_sub(3),
+            };
+            let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+            for (pid, rect) in &areas {
+                if mouse.column >= rect.x
+                    && mouse.column < rect.x + rect.width
+                    && mouse.row >= rect.y
+                    && mouse.row < rect.y + rect.height
+                {
+                    app.active_pane = *pid;
+                    let _ = writer
+                        .send(ClientMessage::FocusPane { pane_id: *pid })
+                        .await;
+                    app.needs_redraw = true;
+                    return;
+                }
+            }
+        }
+        MouseEventKind::Down(MouseButton::Right) => {
+            if app.sidebar_visible && mouse.column < sidebar_w {
+                if mouse.row >= 2 {
+                    app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Space);
+                } else {
+                    app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Sidebar);
+                }
+            } else {
+                let pane_area = ratatui::layout::Rect {
+                    x: sidebar_w,
+                    y: 1,
+                    width: term_w.saturating_sub(sidebar_w + agent_w),
+                    height: term_h.saturating_sub(3),
+                };
+                let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+                let mut found_pane = None;
+                for (pid, rect) in &areas {
+                    if mouse.column >= rect.x
+                        && mouse.column < rect.x + rect.width
+                        && mouse.row >= rect.y
+                        && mouse.row < rect.y + rect.height
+                    {
+                        found_pane = Some(*pid);
+                        break;
+                    }
+                }
+                let target = if let Some(pid) = found_pane {
+                    ContextMenuTarget::Pane(pid)
+                } else {
+                    ContextMenuTarget::Pane(app.active_pane)
+                };
+                app.open_context_menu(mouse.column, mouse.row, target);
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if let InputMode::Scroll { offset } = &mut app.mode {
+                *offset += 3;
+                app.needs_redraw = true;
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if let InputMode::Scroll { offset } = &mut app.mode {
+                *offset = offset.saturating_sub(3);
+                if *offset == 0 {
+                    app.mode = InputMode::Normal;
+                }
+                app.needs_redraw = true;
+            }
+        }
+        _ => {}
+    }
 }
