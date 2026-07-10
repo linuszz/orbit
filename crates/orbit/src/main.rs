@@ -58,6 +58,8 @@ async fn main() -> Result<()> {
             .await;
     }
 
+    let _ = ipc.send(&ClientMessage::RequestFullState).await;
+
     debug!("entering event loop");
     let run_result = events::run(&mut app, ipc, &mut terminal).await;
 

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use orbit_core::VtParser;
-use orbit_protocol::{Cell, FullState, PaneId, PaneLayout, ServerEvent, SplitDir};
+use orbit_protocol::{Cell, CellGrid, FullState, PaneId, PaneLayout, ServerEvent, SplitDir};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
@@ -115,6 +115,14 @@ impl PaneState {
             }
             self.scrollback.push_back(row);
         }
+    }
+
+    pub fn sync_from_server(&mut self, grid: &CellGrid) {
+        self.parser.grid.cells = grid.cells.clone();
+        self.parser.grid.cursor_x = grid.cursor_x;
+        self.parser.grid.cursor_y = grid.cursor_y;
+        self.parser.grid.resize(grid.cols, grid.rows);
+        self.parser.reset_parser();
     }
 }
 
@@ -240,6 +248,23 @@ impl App {
 
     pub fn handle_server_event(&mut self, event: &ServerEvent) {
         match event {
+            ServerEvent::Welcome { state, .. } => {
+                if let Some(s) = state.spaces.first() {
+                    for pane in &s.panes {
+                        if let Some(existing) = self.panes.get_mut(&pane.id) {
+                            existing.sync_from_server(&pane.cell_grid);
+                        } else {
+                            let ps = PaneState::new(
+                                pane.cell_grid.cols.max(1),
+                                pane.cell_grid.rows.max(1),
+                            );
+                            self.panes.insert(pane.id, ps);
+                        }
+                    }
+                    self.active_pane = s.active_pane;
+                }
+                self.needs_redraw = true;
+            }
             ServerEvent::PaneOutput { pane_id, data } => {
                 if let Some(pane) = self.panes.get_mut(pane_id) {
                     pane.process(data);
@@ -255,7 +280,11 @@ impl App {
                     info.panes.iter().map(|p| p.id).collect();
 
                 for pane in &info.panes {
-                    if !old_ids.contains(&pane.id) {
+                    if old_ids.contains(&pane.id) {
+                        if let Some(existing) = self.panes.get_mut(&pane.id) {
+                            existing.sync_from_server(&pane.cell_grid);
+                        }
+                    } else {
                         let ps =
                             PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
                         self.panes.insert(pane.id, ps);
