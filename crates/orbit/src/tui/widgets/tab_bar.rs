@@ -39,10 +39,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     };
     spans.push(Span::styled("[A]", Style::default().fg(agent_color)));
 
-    if app.mode == InputMode::Prefix {
+    if matches!(app.mode, InputMode::CommandPalette { .. }) {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
-            "[PREFIX]",
+            "[FLIGHT DECK]",
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ));
     }

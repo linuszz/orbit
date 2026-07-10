@@ -17,9 +17,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut spans: Vec<Span> = vec![];
 
-    if app.mode == InputMode::Prefix {
+    if matches!(app.mode, InputMode::CommandPalette { .. }) {
         spans.push(Span::styled(
-            " COMMAND  Esc:cancel ",
+            " FLIGHT DECK  Esc:cancel ",
             Style::default()
                 .fg(BG_PRIMARY)
                 .bg(ACCENT)

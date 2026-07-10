@@ -97,6 +97,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.show_help {
         render_help_overlay(frame, area);
     }
+
+    if matches!(app.mode, crate::app::InputMode::CommandPalette { .. }) {
+        widgets::command_palette::render(frame, area, app);
+    }
 }
 
 fn render_help_overlay(frame: &mut Frame, area: Rect) {

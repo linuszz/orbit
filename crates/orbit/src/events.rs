@@ -6,12 +6,25 @@ use futures::StreamExt;
 use orbit_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
 
-use crate::app::{App, InputMode};
+use crate::app::{App, InputMode, COMMANDS};
 use crate::ipc::{IpcClient, IpcWriter};
 use crate::tui::{render, OrbitTerminal};
 
 fn is_prefix_key(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b')
+}
+
+fn filtered_indices(search: &str) -> Vec<usize> {
+    if search.is_empty() {
+        return (0..COMMANDS.len()).collect();
+    }
+    let s = search.to_lowercase();
+    COMMANDS
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.label.to_lowercase().contains(&s))
+        .map(|(i, _)| i)
+        .collect()
 }
 
 fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
@@ -29,7 +42,6 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
         (_, KeyCode::Char(c)) => Some(c.to_string().into_bytes()),
         (_, KeyCode::Enter) => Some(b"\r".to_vec()),
         (_, KeyCode::Backspace) => Some(b"\x7f".to_vec()),
-        // handled separately for pane focus
         (_, KeyCode::Tab) => None,
         (_, KeyCode::Up) => Some(b"\x1b[A".to_vec()),
         (_, KeyCode::Down) => Some(b"\x1b[B".to_vec()),
@@ -45,16 +57,74 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
     }
 }
 
-async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
-    match app.mode {
-        InputMode::Normal => {
-            if app.show_help {
-                app.show_help = false;
-                app.needs_redraw = true;
-                return;
+async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
+    match id {
+        "split_h" => {
+            app.pending_split = Some((app.active_pane, SplitDir::Horizontal));
+            let _ = writer
+                .send(ClientMessage::SplitPane {
+                    pane_id: app.active_pane,
+                    direction: SplitDir::Horizontal,
+                })
+                .await;
+        }
+        "split_v" => {
+            app.pending_split = Some((app.active_pane, SplitDir::Vertical));
+            let _ = writer
+                .send(ClientMessage::SplitPane {
+                    pane_id: app.active_pane,
+                    direction: SplitDir::Vertical,
+                })
+                .await;
+        }
+        "close_pane" => {
+            if app.pane_tree().leaves().len() <= 1 {
+                app.should_quit = true;
             }
+            let _ = writer
+                .send(ClientMessage::ClosePane {
+                    pane_id: app.active_pane,
+                })
+                .await;
+        }
+        "new_tab" => {
+            app.pending_new_tab = true;
+            let _ = writer
+                .send(ClientMessage::SplitPane {
+                    pane_id: app.active_pane,
+                    direction: SplitDir::Horizontal,
+                })
+                .await;
+        }
+        "next_tab" => app.next_tab(),
+        "prev_tab" => app.prev_tab(),
+        "scroll_mode" => {
+            app.mode = InputMode::Scroll { offset: 1 };
+        }
+        "toggle_sidebar" => app.sidebar_visible = !app.sidebar_visible,
+        "toggle_agent" => app.agent_panel_visible = !app.agent_panel_visible,
+        "detach" => app.should_quit = true,
+        "help" => app.show_help = true,
+        _ => {}
+    }
+    app.needs_redraw = true;
+}
+
+async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
+    if app.show_help {
+        app.show_help = false;
+        app.needs_redraw = true;
+        return;
+    }
+
+    match &mut app.mode {
+        InputMode::Normal => {
             if is_prefix_key(&key) {
-                app.mode = InputMode::Prefix;
+                app.mode = InputMode::CommandPalette {
+                    search: String::new(),
+                    selected: 0,
+                    search_focused: false,
+                };
                 app.needs_redraw = true;
                 return;
             }
@@ -76,7 +146,60 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                     .await;
             }
         }
-        InputMode::Scroll { ref mut offset } => {
+        InputMode::CommandPalette {
+            search, selected, ..
+        } => {
+            if is_prefix_key(&key) || key.code == KeyCode::Esc {
+                if search.is_empty() {
+                    app.mode = InputMode::Normal;
+                } else {
+                    search.clear();
+                    *selected = 0;
+                }
+                app.needs_redraw = true;
+                return;
+            }
+
+            let filtered = filtered_indices(search);
+
+            match key.code {
+                KeyCode::Up => {
+                    *selected = selected.saturating_sub(1);
+                }
+                KeyCode::Down if !filtered.is_empty() => {
+                    *selected = (*selected + 1).min(filtered.len() - 1);
+                }
+                KeyCode::Enter => {
+                    if let Some(&cmd_idx) = filtered.get(*selected) {
+                        let cmd_id = COMMANDS[cmd_idx].id;
+                        app.mode = InputMode::Normal;
+                        execute_command(cmd_id, app, writer).await;
+                        return;
+                    }
+                }
+                KeyCode::Backspace => {
+                    search.pop();
+                    *selected = 0;
+                }
+                KeyCode::Char(c) => {
+                    let sc = c.to_string();
+                    let shortcut_cmd = search
+                        .is_empty()
+                        .then(|| COMMANDS.iter().find(|cmd| cmd.shortcut == sc))
+                        .flatten();
+                    if let Some(cmd) = shortcut_cmd {
+                        app.mode = InputMode::Normal;
+                        execute_command(cmd.id, app, writer).await;
+                        return;
+                    }
+                    search.push(c);
+                    *selected = 0;
+                }
+                _ => {}
+            }
+            app.needs_redraw = true;
+        }
+        InputMode::Scroll { offset } => {
             let pane_height = app
                 .panes
                 .get(&app.active_pane)
@@ -111,77 +234,6 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 }
                 _ => {}
             }
-            app.needs_redraw = true;
-        }
-        InputMode::Prefix => {
-            if is_prefix_key(&key) || key.code == KeyCode::Esc {
-                app.mode = InputMode::Normal;
-                app.needs_redraw = true;
-                return;
-            }
-            match key.code {
-                KeyCode::Char('x') => {
-                    let leaves = app.pane_tree().leaves();
-                    let pane_id = app.active_pane;
-                    if leaves.len() <= 1 {
-                        app.should_quit = true;
-                    }
-                    let _ = writer.send(ClientMessage::ClosePane { pane_id }).await;
-                }
-                KeyCode::Char('d') => {
-                    app.should_quit = true;
-                }
-                KeyCode::Char('h') => {
-                    app.pending_split = Some((app.active_pane, SplitDir::Horizontal));
-                    let _ = writer
-                        .send(ClientMessage::SplitPane {
-                            pane_id: app.active_pane,
-                            direction: SplitDir::Horizontal,
-                        })
-                        .await;
-                }
-                KeyCode::Char('v') => {
-                    app.pending_split = Some((app.active_pane, SplitDir::Vertical));
-                    let _ = writer
-                        .send(ClientMessage::SplitPane {
-                            pane_id: app.active_pane,
-                            direction: SplitDir::Vertical,
-                        })
-                        .await;
-                }
-                KeyCode::Char('b') => {
-                    app.sidebar_visible = !app.sidebar_visible;
-                }
-                KeyCode::Char('a') => {
-                    app.agent_panel_visible = !app.agent_panel_visible;
-                }
-                KeyCode::Char('[') => {
-                    app.mode = InputMode::Scroll { offset: 1 };
-                    app.needs_redraw = true;
-                    return;
-                }
-                KeyCode::Char('c') => {
-                    app.pending_new_tab = true;
-                    let _ = writer
-                        .send(ClientMessage::SplitPane {
-                            pane_id: app.active_pane,
-                            direction: SplitDir::Horizontal,
-                        })
-                        .await;
-                }
-                KeyCode::Char('n') => {
-                    app.next_tab();
-                }
-                KeyCode::Char('p') => {
-                    app.prev_tab();
-                }
-                KeyCode::Char('?') => {
-                    app.show_help = !app.show_help;
-                    return;
-                }
-                _ => {}
-            }
-            app.mode = InputMode::Normal;
             app.needs_redraw = true;
         }
     }
@@ -254,11 +306,12 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                             MouseEventKind::Down(MouseButton::Left) => {
                                 let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
                                 let agent_w: u16 = if app.agent_panel_visible { 22 } else { 0 };
+                                let term = terminal.size().unwrap_or_default();
                                 let pane_area = ratatui::layout::Rect {
                                     x: sidebar_w,
                                     y: 1,
-                                    width: terminal.size().unwrap_or_default().width.saturating_sub(sidebar_w + agent_w),
-                                    height: terminal.size().unwrap_or_default().height.saturating_sub(3),
+                                    width: term.width.saturating_sub(sidebar_w + agent_w),
+                                    height: term.height.saturating_sub(3),
                                 };
                                 let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
                                 for (pid, rect) in &areas {

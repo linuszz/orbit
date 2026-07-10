@@ -6,9 +6,91 @@ use orbit_protocol::{Cell, FullState, PaneId, ServerEvent, SplitDir};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
-    Prefix,
-    Scroll { offset: usize },
+    CommandPalette {
+        search: String,
+        selected: usize,
+        search_focused: bool,
+    },
+    Scroll {
+        offset: usize,
+    },
 }
+
+pub struct CommandDef {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub group: &'static str,
+    pub shortcut: &'static str,
+}
+
+pub static COMMANDS: &[CommandDef] = &[
+    CommandDef {
+        id: "split_h",
+        label: "Split Horizontal",
+        group: "Pane",
+        shortcut: "h",
+    },
+    CommandDef {
+        id: "split_v",
+        label: "Split Vertical",
+        group: "Pane",
+        shortcut: "v",
+    },
+    CommandDef {
+        id: "close_pane",
+        label: "Close Pane",
+        group: "Pane",
+        shortcut: "x",
+    },
+    CommandDef {
+        id: "scroll_mode",
+        label: "Enter Scroll Mode",
+        group: "Pane",
+        shortcut: "[",
+    },
+    CommandDef {
+        id: "new_tab",
+        label: "New Tab",
+        group: "Tab",
+        shortcut: "c",
+    },
+    CommandDef {
+        id: "next_tab",
+        label: "Next Tab",
+        group: "Tab",
+        shortcut: "n",
+    },
+    CommandDef {
+        id: "prev_tab",
+        label: "Previous Tab",
+        group: "Tab",
+        shortcut: "p",
+    },
+    CommandDef {
+        id: "toggle_sidebar",
+        label: "Toggle Sidebar",
+        group: "View",
+        shortcut: "b",
+    },
+    CommandDef {
+        id: "toggle_agent",
+        label: "Toggle Agent Monitor",
+        group: "View",
+        shortcut: "a",
+    },
+    CommandDef {
+        id: "detach",
+        label: "Detach Session",
+        group: "Session",
+        shortcut: "d",
+    },
+    CommandDef {
+        id: "help",
+        label: "Show Help",
+        group: "Help",
+        shortcut: "?",
+    },
+];
 
 pub struct PaneState {
     pub parser: VtParser,
