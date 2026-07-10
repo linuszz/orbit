@@ -23,7 +23,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     let mut y = area.y;
 
     let header = Line::from(vec![
-        Span::styled(" ", Style::default()),
+        Span::raw(" "),
         Span::styled(
             "SPACES",
             Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
@@ -91,19 +91,16 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     );
     y += 1;
 
-    let status_line = if app.agent_panel_visible {
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled("○ idle", Style::default().fg(ACCENT_IDLE)),
-        ])
-    } else {
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled("○ idle", Style::default().fg(FG_MUTED)),
-        ])
-    };
+    let leaf_count = app.pane_tree().leaves().len();
+    let tab_count = app.tabs.len();
+    let stats = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(format!("{tab_count}t"), Style::default().fg(FG_MUTED)),
+        Span::raw(" "),
+        Span::styled(format!("{leaf_count}p"), Style::default().fg(FG_MUTED)),
+    ]);
     frame.render_widget(
-        status_line,
+        stats,
         Rect {
             x: area.x,
             y,
@@ -111,6 +108,23 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
             height: 1,
         },
     );
+    y += 1;
+
+    let status = Line::from(vec![
+        Span::raw(" "),
+        Span::styled("\u{25CB} ", Style::default().fg(ACCENT_IDLE)),
+        Span::styled("idle", Style::default().fg(FG_MUTED)),
+    ]);
+    frame.render_widget(
+        status,
+        Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: 1,
+        },
+    );
+
     let bottom_y = area.y + area.height.saturating_sub(1);
     let actions = Line::from(vec![
         Span::styled(" [+] ", Style::default().fg(ACCENT).bg(BG_CARD)),

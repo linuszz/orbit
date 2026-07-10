@@ -15,22 +15,33 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(BORDER));
     frame.render_widget(bg, area);
 
-    let mut spans = vec![Span::raw(" ")];
+    let tab_width = area.width.saturating_sub(14) as usize;
+    let mut spans: Vec<Span> = vec![Span::raw(" ")];
 
+    let mut used = 1usize;
     for (i, tab) in app.tabs.iter().enumerate() {
-        if i == app.active_tab {
-            spans.push(Span::styled(
-                &tab.name,
-                Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(" ", Style::default()));
-        } else {
-            spans.push(Span::styled(&tab.name, Style::default().fg(FG_MUTED)));
-            spans.push(Span::raw("  "));
+        if used >= tab_width {
+            break;
         }
+        let label = format!(" {} ", tab.name);
+        let style = if i == app.active_tab {
+            Style::default()
+                .fg(FG_PRIMARY)
+                .bg(BG_TERTIARY)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(FG_MUTED)
+        };
+        spans.push(Span::styled(label, style));
+        used += tab.name.len() + 3;
     }
 
-    spans.push(Span::raw("  "));
+    spans.push(Span::styled(" + ", Style::default().fg(ACCENT)));
+
+    let remaining = area.width.saturating_sub(used as u16 + 8);
+    if remaining > 0 {
+        spans.push(Span::raw(" ".repeat(remaining as usize)));
+    }
 
     let agent_color = if app.agent_panel_visible {
         ACCENT
@@ -38,6 +49,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         FG_MUTED
     };
     spans.push(Span::styled("[A]", Style::default().fg(agent_color)));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        "Satellites",
+        Style::default().fg(if app.agent_panel_visible {
+            ACCENT
+        } else {
+            FG_MUTED
+        }),
+    ));
 
     if matches!(app.mode, InputMode::CommandPalette { .. }) {
         spans.push(Span::raw("  "));
