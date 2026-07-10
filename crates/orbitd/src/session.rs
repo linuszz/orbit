@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use orbit_protocol::{
-    CellGrid, FullState, PaneId, PaneInfo, ServerEvent, SpaceId, SpaceInfo, SplitDir,
+    CellGrid, FullState, PaneId, PaneInfo, PaneLayout, ServerEvent, SpaceId, SpaceInfo, SplitDir,
 };
 use portable_pty::PtySize;
 use tokio::sync::{broadcast, mpsc, RwLock};
@@ -20,10 +20,9 @@ pub struct SessionState {
     pub space_id: SpaceId,
     pub space_name: String,
     pub panes: RwLock<HashMap<PaneId, PaneEntry>>,
-    pub pane_order: RwLock<Vec<PaneId>>,
+    pub pane_tree: RwLock<PaneLayout>,
     pub active_pane: RwLock<PaneId>,
     pub next_pane_id: AtomicU32,
-    pub layout: RwLock<SplitDir>,
     pub event_bus: broadcast::Sender<ServerEvent>,
     pub shell: String,
     pub cwd: String,
@@ -55,10 +54,9 @@ impl SessionState {
             space_id: SpaceId(0),
             space_name: "default".to_string(),
             panes: RwLock::new(panes),
-            pane_order: RwLock::new(vec![pane_id]),
+            pane_tree: RwLock::new(PaneLayout::Leaf(pane_id)),
             active_pane: RwLock::new(pane_id),
             next_pane_id: AtomicU32::new(1),
-            layout: RwLock::new(SplitDir::Horizontal),
             event_bus,
             shell,
             cwd,
@@ -67,6 +65,7 @@ impl SessionState {
 
     pub async fn split_pane(&self, direction: SplitDir) -> anyhow::Result<PaneId> {
         let new_id = PaneId(self.next_pane_id.fetch_add(1, Ordering::Relaxed));
+        let active = *self.active_pane.read().await;
         let (cols, rows) = self.active_pane_size().await;
 
         let handles = pty::spawn_pty(
@@ -91,8 +90,12 @@ impl SessionState {
                 },
             );
         }
-        self.pane_order.write().await.push(new_id);
-        *self.layout.write().await = direction;
+
+        {
+            let mut tree = self.pane_tree.write().await;
+            tree.split_leaf(active, direction, new_id);
+        }
+
         *self.active_pane.write().await = new_id;
 
         let _ = self
@@ -110,21 +113,31 @@ impl SessionState {
                 }
             }
         }
+
         {
-            let mut order = self.pane_order.write().await;
-            order.retain(|&id| id != pane_id);
-            if order.is_empty() {
-                let _ = self.event_bus.send(ServerEvent::SpaceClosed(self.space_id));
-                return;
-            }
+            let mut tree = self.pane_tree.write().await;
+            tree.remove_leaf(pane_id);
         }
+
+        let tree_empty = self.pane_tree.read().await.leaves().is_empty();
+        if tree_empty {
+            let _ = self.event_bus.send(ServerEvent::SpaceClosed(self.space_id));
+            return;
+        }
+
         {
             let mut active = self.active_pane.write().await;
+            let leaves = self.pane_tree.read().await.leaves();
             if *active == pane_id {
-                *active = self.pane_order.read().await[0];
+                if let Some(&first) = leaves.first() {
+                    *active = first;
+                }
             }
         }
-        let _ = self.event_buf_send_updated().await;
+
+        let _ = self
+            .event_bus
+            .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 
     pub async fn send_input(&self, pane_id: PaneId, data: Vec<u8>) {
@@ -176,10 +189,11 @@ impl SessionState {
 
     async fn collect_space_info(&self) -> SpaceInfo {
         let panes = self.panes.read().await;
-        let order = self.pane_order.read().await;
+        let tree = self.pane_tree.read().await;
         let active = *self.active_pane.read().await;
 
-        let pane_infos: Vec<PaneInfo> = order
+        let pane_infos: Vec<PaneInfo> = tree
+            .leaves()
             .iter()
             .filter_map(|&pid| {
                 panes.get(&pid).map(|entry| {
@@ -206,12 +220,7 @@ impl SessionState {
             name: self.space_name.clone(),
             panes: pane_infos,
             active_pane: active,
+            layout: tree.clone(),
         }
-    }
-
-    async fn event_buf_send_updated(&self) {
-        let _ = self
-            .event_bus
-            .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 }

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use orbit_core::VtParser;
-use orbit_protocol::{Cell, FullState, PaneId, ServerEvent, SplitDir};
+use orbit_protocol::{Cell, FullState, PaneId, PaneLayout, ServerEvent, SplitDir};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
@@ -119,73 +119,9 @@ impl PaneState {
 }
 
 #[derive(Debug, Clone)]
-pub enum PaneNode {
-    Leaf(PaneId),
-    Split {
-        direction: SplitDir,
-        first: Box<PaneNode>,
-        second: Box<PaneNode>,
-    },
-}
-
-impl PaneNode {
-    pub fn split_leaf(&mut self, target: PaneId, direction: SplitDir, new_id: PaneId) -> bool {
-        match self {
-            PaneNode::Leaf(id) if *id == target => {
-                *self = PaneNode::Split {
-                    direction,
-                    first: Box::new(PaneNode::Leaf(target)),
-                    second: Box::new(PaneNode::Leaf(new_id)),
-                };
-                true
-            }
-            PaneNode::Leaf(_) => false,
-            PaneNode::Split { first, second, .. } => {
-                first.split_leaf(target, direction, new_id)
-                    || second.split_leaf(target, direction, new_id)
-            }
-        }
-    }
-
-    pub fn remove_leaf(&mut self, target: PaneId) -> bool {
-        match self {
-            PaneNode::Leaf(id) => *id != target,
-            PaneNode::Split { first, second, .. } => {
-                if let PaneNode::Leaf(id) = **first {
-                    if id == target {
-                        *self = (**second).clone();
-                        return true;
-                    }
-                }
-                if let PaneNode::Leaf(id) = **second {
-                    if id == target {
-                        *self = (**first).clone();
-                        return true;
-                    }
-                }
-                first.remove_leaf(target);
-                second.remove_leaf(target);
-                true
-            }
-        }
-    }
-
-    pub fn leaves(&self) -> Vec<PaneId> {
-        match self {
-            PaneNode::Leaf(id) => vec![*id],
-            PaneNode::Split { first, second, .. } => {
-                let mut v = first.leaves();
-                v.extend(second.leaves());
-                v
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct Tab {
     pub name: String,
-    pub pane_tree: PaneNode,
+    pub pane_tree: PaneLayout,
 }
 
 pub struct App {
@@ -227,14 +163,18 @@ impl App {
             .map(|p| p.id)
             .unwrap_or(PaneId(0));
 
+        let pane_tree = space
+            .map(|s| s.layout.clone())
+            .unwrap_or(PaneLayout::Leaf(first_pane));
+
         Self {
             panes,
             tabs: vec![Tab {
                 name: "dev".to_string(),
-                pane_tree: PaneNode::Leaf(first_pane),
+                pane_tree,
             }],
             active_tab: 0,
-            active_pane: first_pane,
+            active_pane: space.map(|s| s.active_pane).unwrap_or(first_pane),
             pending_split: None,
             pending_new_tab: false,
             tab_counter: 1,
@@ -251,7 +191,7 @@ impl App {
         }
     }
 
-    pub fn pane_tree(&self) -> &PaneNode {
+    pub fn pane_tree(&self) -> &PaneLayout {
         &self.tabs[self.active_tab].pane_tree
     }
 
@@ -325,7 +265,7 @@ impl App {
                             self.tab_counter += 1;
                             self.tabs.push(Tab {
                                 name: format!("tab{}", self.tab_counter),
-                                pane_tree: PaneNode::Leaf(pane.id),
+                                pane_tree: PaneLayout::Leaf(pane.id),
                             });
                             self.active_tab = self.tabs.len() - 1;
                             self.active_pane = pane.id;

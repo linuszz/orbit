@@ -119,6 +119,71 @@ pub struct SpaceInfo {
     pub name: String,
     pub panes: Vec<PaneInfo>,
     pub active_pane: PaneId,
+    pub layout: PaneLayout,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PaneLayout {
+    Leaf(PaneId),
+    Split {
+        direction: SplitDir,
+        first: Box<PaneLayout>,
+        second: Box<PaneLayout>,
+    },
+}
+
+impl PaneLayout {
+    pub fn split_leaf(&mut self, target: PaneId, direction: SplitDir, new_id: PaneId) -> bool {
+        match self {
+            PaneLayout::Leaf(id) if *id == target => {
+                *self = PaneLayout::Split {
+                    direction,
+                    first: Box::new(PaneLayout::Leaf(target)),
+                    second: Box::new(PaneLayout::Leaf(new_id)),
+                };
+                true
+            }
+            PaneLayout::Leaf(_) => false,
+            PaneLayout::Split { first, second, .. } => {
+                first.split_leaf(target, direction, new_id)
+                    || second.split_leaf(target, direction, new_id)
+            }
+        }
+    }
+
+    pub fn remove_leaf(&mut self, target: PaneId) -> bool {
+        match self {
+            PaneLayout::Leaf(id) => *id != target,
+            PaneLayout::Split { first, second, .. } => {
+                if let PaneLayout::Leaf(id) = **first {
+                    if id == target {
+                        *self = (**second).clone();
+                        return true;
+                    }
+                }
+                if let PaneLayout::Leaf(id) = **second {
+                    if id == target {
+                        *self = (**first).clone();
+                        return true;
+                    }
+                }
+                first.remove_leaf(target);
+                second.remove_leaf(target);
+                true
+            }
+        }
+    }
+
+    pub fn leaves(&self) -> Vec<PaneId> {
+        match self {
+            PaneLayout::Leaf(id) => vec![*id],
+            PaneLayout::Split { first, second, .. } => {
+                let mut v = first.leaves();
+                v.extend(second.leaves());
+                v
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

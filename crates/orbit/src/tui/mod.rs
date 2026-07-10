@@ -16,8 +16,9 @@ use ratatui::{
 };
 use std::io::{self, Stdout};
 
-use crate::app::{App, InputMode, PaneNode, PaneState};
+use crate::app::{App, InputMode, PaneState};
 use orbit_protocol::Cell;
+use orbit_protocol::PaneLayout;
 use theme::*;
 
 pub type OrbitTerminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
@@ -196,10 +197,10 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
     );
 }
 
-pub fn compute_leaf_areas(node: &PaneNode, area: Rect) -> Vec<(PaneId, Rect)> {
+pub fn compute_leaf_areas(node: &PaneLayout, area: Rect) -> Vec<(PaneId, Rect)> {
     match node {
-        PaneNode::Leaf(pid) => vec![(*pid, area)],
-        PaneNode::Split {
+        PaneLayout::Leaf(pid) => vec![(*pid, area)],
+        PaneLayout::Split {
             direction,
             first,
             second,
@@ -212,12 +213,12 @@ pub fn compute_leaf_areas(node: &PaneNode, area: Rect) -> Vec<(PaneId, Rect)> {
     }
 }
 
-fn render_pane_tree(frame: &mut Frame, area: Rect, node: &PaneNode, app: &App) {
+fn render_pane_tree(frame: &mut Frame, area: Rect, node: &PaneLayout, app: &App) {
     match node {
-        PaneNode::Leaf(pid) => {
+        PaneLayout::Leaf(pid) => {
             render_single_pane(frame, area, *pid, app);
         }
-        PaneNode::Split {
+        PaneLayout::Split {
             direction,
             first,
             second,
