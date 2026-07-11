@@ -901,12 +901,13 @@ async fn handle_mouse(
                     }
                 }
 
-                // Eclipse banner [Respond] (row 3 of panel when blocked)
+                // Eclipse banner [Respond] — row shifts when "N above" indicator is shown.
                 let any_blocked = app
                     .agents
                     .iter()
                     .any(|a| a.status == orbit_protocol::AgentStatus::Blocked);
-                if any_blocked && mouse.row == 3 && (1..=9).contains(&col_in_inner) {
+                let respond_row = 3u16 + if app.agent_scroll_offset > 0 { 1 } else { 0 };
+                if any_blocked && mouse.row == respond_row && (1..=9).contains(&col_in_inner) {
                     // [Respond] banner — open Eclipse modal for the first blocked agent
                     if let Some(blocked) = app
                         .agents
@@ -920,8 +921,12 @@ async fn handle_mouse(
                 }
 
                 // Card button clicks — iterate only the visible (scrolled) agents.
-                let base_row =
-                    crate::tui::widgets::agent_monitor::card_start_row(0, any_blocked, 0);
+                let base_row = crate::tui::widgets::agent_monitor::card_start_row(
+                    0,
+                    app.agent_scroll_offset,
+                    any_blocked,
+                    0,
+                );
                 let mut card_row_start = base_row;
                 let scroll = app.agent_scroll_offset;
                 // Collect (id, pane_id, status) so we can drop the borrow before mutations.
@@ -1311,11 +1316,18 @@ async fn handle_mouse(
                     } else {
                         None
                     }
-                } else if any_blocked && mouse.row == 3 && (1..=9).contains(&col_in_inner) {
+                } else if any_blocked
+                    && mouse.row == 3 + if app.agent_scroll_offset > 0 { 1 } else { 0 }
+                    && (1..=9).contains(&col_in_inner)
+                {
                     Some(AgentHover::EclipseRespond)
                 } else {
-                    let base_row =
-                        crate::tui::widgets::agent_monitor::card_start_row(0, any_blocked, 0);
+                    let base_row = crate::tui::widgets::agent_monitor::card_start_row(
+                        0,
+                        app.agent_scroll_offset,
+                        any_blocked,
+                        0,
+                    );
                     let mut card_row_start = base_row;
                     let mut found = None;
                     for (card_idx, _) in app.agents.iter().skip(app.agent_scroll_offset).enumerate()

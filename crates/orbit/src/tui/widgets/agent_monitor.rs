@@ -186,6 +186,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut y = area.y + 2;
 
+    // --- "N above" scroll indicator ---
+    if app.agent_scroll_offset > 0 && y < area.y + area.height {
+        let above_text = format!(" \u{25B4} {} above", app.agent_scroll_offset);
+        frame.render_widget(
+            Paragraph::new(Span::styled(above_text, Style::default().fg(FG_MUTED))),
+            Rect {
+                x: ix,
+                y,
+                width: iw,
+                height: 1,
+            },
+        );
+        y += 1;
+    }
+
     // --- Eclipse banner ---
     if !blocked_agents.is_empty() {
         let name_part = if blocked_agents.len() == 1 {
@@ -539,8 +554,15 @@ fn render_card(
 
 /// Returns the row (absolute) where agent card `card_idx` starts, given panel geometry.
 /// `panel_y`: top row of the agent panel.
+/// `scroll_offset`: number of agents scrolled past (adds 1 row for "N above" indicator).
 /// `any_blocked`: whether the eclipse banner is showing (adds 2 rows).
-pub fn card_start_row(panel_y: u16, any_blocked: bool, card_idx: usize) -> u16 {
-    let base = panel_y + 2 + if any_blocked { 2 } else { 0 };
-    base + card_idx as u16 * 6
+pub fn card_start_row(
+    panel_y: u16,
+    scroll_offset: usize,
+    any_blocked: bool,
+    card_idx: usize,
+) -> u16 {
+    let above_row = if scroll_offset > 0 { 1u16 } else { 0 };
+    let blocked_rows = if any_blocked { 2u16 } else { 0 };
+    panel_y + 2 + above_row + blocked_rows + card_idx as u16 * 6
 }

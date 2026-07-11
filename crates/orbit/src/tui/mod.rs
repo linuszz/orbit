@@ -129,7 +129,7 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
     frame.render_widget(dim, area);
 
     let help_w = 48u16.min(area.width.saturating_sub(4));
-    let help_h = 18u16.min(area.height.saturating_sub(4));
+    let help_h = 20u16.min(area.height.saturating_sub(4));
     let x = area.x + (area.width - help_w) / 2;
     let y = area.y + (area.height - help_h) / 2;
     let help_area = Rect {
