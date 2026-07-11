@@ -523,8 +523,8 @@ async fn handle_mouse(
                     app.needs_redraw = true;
                     return;
                 }
-                // Handle « collapse button (last 3 cols of header for a larger click target)
-                if app.sidebar_visible && mouse.column >= SIDEBAR_W - 3 {
+                // Handle « collapse button (left 3 cols of header, away from tab bar edge)
+                if app.sidebar_visible && mouse.column < 3 {
                     app.sidebar_visible = false;
                     app.needs_redraw = true;
                     return;
@@ -761,9 +761,9 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Moved => {
-            // Sidebar toggle button hover (« collapse — last 3 cols; » expand — whole 2-col area)
+            // Sidebar toggle button hover (« collapse — left 3 cols; » expand — whole 2-col area)
             let toggle_hovered = if app.sidebar_visible {
-                mouse.row == 0 && mouse.column >= SIDEBAR_W - 3
+                mouse.row == 0 && mouse.column < 3
             } else {
                 mouse.row == 0 && mouse.column < SIDEBAR_COLLAPSED_W
             };
