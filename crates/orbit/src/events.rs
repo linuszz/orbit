@@ -496,7 +496,7 @@ async fn handle_mouse(
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            if mouse.row == 1 {
+            if mouse.row == 0 {
                 if app.sidebar_visible && mouse.column < sidebar_w {
                     return;
                 }
@@ -543,9 +543,9 @@ async fn handle_mouse(
             }
             // Sidebar: click a space card
             if app.sidebar_visible && mouse.column < SIDEBAR_W {
-                // Cards start at row 2 (after header + divider). Each card is 5 rows + 1 gap = 6 rows.
+                // Cards start at row 2 (after header + divider). Each card is 4 content rows + 1 gap = 5 rows.
                 let content_row = mouse.row.saturating_sub(2);
-                let card_idx = (content_row / 6) as usize;
+                let card_idx = (content_row / 5) as usize;
                 if card_idx < app.spaces.len() {
                     let space_id = app.spaces[card_idx].space_id;
                     app.active_space_idx = card_idx;
@@ -573,20 +573,23 @@ async fn handle_mouse(
                             pane_id: *pid,
                         })
                         .await;
-                    // Start selection at inner cell coords (account for border)
-                    let inner_x = rect.x + 1;
-                    let inner_y = rect.y + 1;
-                    if mouse.column >= inner_x && mouse.row >= inner_y {
-                        let col = mouse.column - inner_x;
-                        let row = mouse.row - inner_y;
-                        app.selection = Some(crate::app::Selection {
-                            pane_id: *pid,
-                            start: (col, row),
-                            end: (col, row),
-                            active: true,
-                        });
-                    } else {
-                        app.selection = None;
+                    // Start selection at inner cell coords (account for border),
+                    // but only in Normal mode — scroll/command modes must not begin selections.
+                    if matches!(app.mode, InputMode::Normal) {
+                        let inner_x = rect.x + 1;
+                        let inner_y = rect.y + 1;
+                        if mouse.column >= inner_x && mouse.row >= inner_y {
+                            let col = mouse.column - inner_x;
+                            let row = mouse.row - inner_y;
+                            app.selection = Some(crate::app::Selection {
+                                pane_id: *pid,
+                                start: (col, row),
+                                end: (col, row),
+                                active: true,
+                            });
+                        } else {
+                            app.selection = None;
+                        }
                     }
                     app.needs_redraw = true;
                     return;
@@ -718,10 +721,10 @@ async fn handle_mouse(
 
             // Sidebar card hover
             if app.sidebar_visible && mouse.column < SIDEBAR_W {
-                // Each card is 5 rows tall (top_border+cwd+stats+bottom) + 1 gap = 6 rows.
+                // Each card is 4 content rows (top_border+cwd+stats+bottom) + 1 gap = 5 rows.
                 // Cards start after header (2 rows: "SPACES«" + divider).
                 let content_row = mouse.row.saturating_sub(2);
-                let card_idx = (content_row / 6) as usize;
+                let card_idx = (content_row / 5) as usize;
                 let hovered = if card_idx < app.spaces.len() {
                     Some(card_idx)
                 } else {

@@ -5,16 +5,9 @@ use crate::app::App;
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, Borders, Paragraph};
+    use ratatui::widgets::Paragraph;
 
     use crate::tui::theme::*;
-
-    // Bottom border on the bar
-    let bar_block = Block::default()
-        .borders(Borders::BOTTOM)
-        .border_style(Style::default().fg(BORDER));
-    let inner = bar_block.inner(area);
-    frame.render_widget(bar_block, area);
 
     let mut spans: Vec<Span> = Vec::new();
 
@@ -33,21 +26,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
 
-    // New tab button
-    let new_tab_bg = if app.tab_hovered == Some(app.tabs.len()) {
+    // New tab button: default text=FG_MUTED bg=BG_CARD, hover text=ACCENT bg=BG_CARD
+    let new_tab_fg = if app.tab_hovered == Some(app.tabs.len()) {
         ACCENT
     } else {
-        BG_CARD
+        FG_MUTED
     };
     spans.push(Span::styled(
         " + ",
-        Style::default().fg(FG_MUTED).bg(new_tab_bg),
+        Style::default().fg(new_tab_fg).bg(BG_CARD),
     ));
 
     // Fill remaining space with BG_SECONDARY
     let used_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum::<u16>();
     let agent_badge_w: u16 = " [A] Satellites ".len() as u16;
-    let fill_len = inner.width.saturating_sub(used_width + agent_badge_w) as usize;
+    let fill_len = area.width.saturating_sub(used_width + agent_badge_w) as usize;
     spans.push(Span::styled(
         " ".repeat(fill_len),
         Style::default().bg(BG_SECONDARY),
@@ -65,5 +58,5 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ));
 
     let line = Line::from(spans);
-    frame.render_widget(Paragraph::new(line), inner);
+    frame.render_widget(Paragraph::new(line), area);
 }

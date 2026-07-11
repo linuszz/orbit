@@ -43,13 +43,20 @@ pub fn generate_space_name(existing: &[&str]) -> String {
             return candidate;
         }
     }
-    // Fallback: append attempt index
+    // Fallback: pick a fixed adj-noun pair and increment a counter until unique.
     let mut h = DefaultHasher::new();
     seed.hash(&mut h);
     let v = h.finish() as usize;
     let adj = ADJECTIVES[v % ADJECTIVES.len()];
     let noun = NOUNS[(v / ADJECTIVES.len()) % NOUNS.len()];
-    format!("{adj}-{noun}-2")
+    let mut n = 2u32;
+    loop {
+        let candidate = format!("{adj}-{noun}-{n}");
+        if !existing.contains(&candidate.as_str()) {
+            return candidate;
+        }
+        n += 1;
+    }
 }
 
 pub struct PaneEntry {
