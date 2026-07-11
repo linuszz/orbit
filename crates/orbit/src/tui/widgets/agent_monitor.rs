@@ -70,7 +70,7 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
 
     let msg = Line::from(vec![
         Span::raw(" "),
-        Span::styled("No satellites", Style::default().fg(FG_MUTED)),
+        Span::styled("No agents", Style::default().fg(FG_MUTED)),
     ]);
     frame.render_widget(
         msg,

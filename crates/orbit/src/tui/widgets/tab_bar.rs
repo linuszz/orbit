@@ -66,7 +66,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::styled("[A]", Style::default().fg(agent_color)));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(
-        "Satellites",
+        "Agents",
         Style::default().fg(if app.agent_panel_visible {
             ACCENT
         } else {
