@@ -17,7 +17,7 @@ use ratatui::{
 };
 use std::io::{self, Stdout};
 
-use crate::app::{App, InputMode, PaneState};
+use crate::app::{App, InputMode, PaneState, Selection};
 use orbit_protocol::Cell;
 use orbit_protocol::PaneLayout;
 use theme::*;
@@ -317,12 +317,21 @@ fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App)
                 inner,
                 pane,
                 is_active && app.mode == InputMode::Normal,
+                app.selection.as_ref(),
+                pane_id,
             );
         }
     }
 }
 
-fn render_cells(frame: &mut Frame, area: Rect, pane: &PaneState, show_cursor: bool) {
+fn render_cells(
+    frame: &mut Frame,
+    area: Rect,
+    pane: &PaneState,
+    show_cursor: bool,
+    selection: Option<&Selection>,
+    pane_id: PaneId,
+) {
     let grid = &pane.parser.grid;
     let rows = (area.height as usize).min(grid.rows as usize);
     let cols = (area.width as usize).min(grid.cols as usize);
@@ -335,8 +344,29 @@ fn render_cells(frame: &mut Frame, area: Rect, pane: &PaneState, show_cursor: bo
             if let Some(buf_cell) = frame.buffer_mut().cell_mut((x, y)) {
                 let ch = if cell.ch == '\0' { ' ' } else { cell.ch };
                 buf_cell.set_char(ch);
-                let fg = term_color(&cell.fg);
-                let bg = term_color(&cell.bg);
+                let mut fg = term_color(&cell.fg);
+                let mut bg = term_color(&cell.bg);
+                let in_selection = selection.is_some_and(|sel| {
+                    sel.pane_id == pane_id && {
+                        let (min_col, max_col) = if sel.start.0 <= sel.end.0 {
+                            (sel.start.0, sel.end.0)
+                        } else {
+                            (sel.end.0, sel.start.0)
+                        };
+                        let (min_row, max_row) = if sel.start.1 <= sel.end.1 {
+                            (sel.start.1, sel.end.1)
+                        } else {
+                            (sel.end.1, sel.start.1)
+                        };
+                        col as u16 >= min_col
+                            && col as u16 <= max_col
+                            && row as u16 >= min_row
+                            && row as u16 <= max_row
+                    }
+                });
+                if in_selection {
+                    std::mem::swap(&mut fg, &mut bg);
+                }
                 let mut style = Style::default().fg(fg).bg(bg);
                 let mut mods = Modifier::empty();
                 if cell.flags.bold() {

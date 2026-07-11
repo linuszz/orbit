@@ -357,29 +357,47 @@ impl App {
 
     pub fn open_context_menu(&mut self, x: u16, y: u16, target: ContextMenuTarget) {
         let items = match &target {
-            ContextMenuTarget::Pane(_) => vec![
-                ContextMenuItem::Action {
-                    label: "Split Horizontal".into(),
-                    shortcut: "h".into(),
-                    id: "split_h",
-                },
-                ContextMenuItem::Action {
-                    label: "Split Vertical".into(),
-                    shortcut: "v".into(),
-                    id: "split_v",
-                },
-                ContextMenuItem::Separator,
-                ContextMenuItem::Action {
-                    label: "Close Pane".into(),
-                    shortcut: "x".into(),
-                    id: "close_pane",
-                },
-                ContextMenuItem::Action {
-                    label: "Maximize Pane".into(),
-                    shortcut: "z".into(),
-                    id: "maximize",
-                },
-            ],
+            ContextMenuTarget::Pane(pane_id) => {
+                let mut items = vec![
+                    ContextMenuItem::Action {
+                        label: "Split Horizontal".into(),
+                        shortcut: "h".into(),
+                        id: "split_h",
+                    },
+                    ContextMenuItem::Action {
+                        label: "Split Vertical".into(),
+                        shortcut: "v".into(),
+                        id: "split_v",
+                    },
+                    ContextMenuItem::Separator,
+                    ContextMenuItem::Action {
+                        label: "Close Pane".into(),
+                        shortcut: "x".into(),
+                        id: "close_pane",
+                    },
+                    ContextMenuItem::Action {
+                        label: "Maximize Pane".into(),
+                        shortcut: "z".into(),
+                        id: "maximize",
+                    },
+                ];
+                if self
+                    .selection
+                    .as_ref()
+                    .is_some_and(|s| s.pane_id == *pane_id)
+                {
+                    items.insert(
+                        0,
+                        ContextMenuItem::Action {
+                            label: "Copy Selection".into(),
+                            shortcut: String::new(),
+                            id: "copy_selection",
+                        },
+                    );
+                    items.insert(1, ContextMenuItem::Separator);
+                }
+                items
+            }
             ContextMenuTarget::Space => vec![
                 ContextMenuItem::Action {
                     label: "Rename".into(),

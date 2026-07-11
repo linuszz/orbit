@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::app::{App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
 use crate::ipc::{IpcClient, IpcWriter};
-use crate::tui::{render, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
+use crate::tui::{render, OrbitTerminal, AGENT_W, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
 
 fn is_prefix_key(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b')
@@ -54,6 +54,21 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
         (_, KeyCode::Delete) => Some(b"\x1b[3~".to_vec()),
         (_, KeyCode::Esc) => Some(b"\x1b".to_vec()),
         _ => None,
+    }
+}
+
+fn content_area(term_size: ratatui::layout::Rect, app: &App) -> ratatui::layout::Rect {
+    let sidebar_w = if app.sidebar_visible {
+        SIDEBAR_W
+    } else {
+        SIDEBAR_COLLAPSED_W
+    };
+    let agent_w = if app.agent_panel_visible { AGENT_W } else { 0 };
+    ratatui::layout::Rect {
+        x: sidebar_w,
+        y: 1, // below tab bar
+        width: term_size.width.saturating_sub(sidebar_w + agent_w),
+        height: term_size.height.saturating_sub(2), // above status bar
     }
 }
 
@@ -155,6 +170,44 @@ async fn execute_context_action(id: &str, app: &mut App, writer: &IpcWriter) {
                 })
                 .await;
         }
+        "copy_selection" => {
+            if let Some(sel) = app.selection.clone() {
+                let pane_id = sel.pane_id;
+                if let Some(pane_state) = app.panes.get(&pane_id) {
+                    let grid = &pane_state.parser.grid;
+                    let (min_col, max_col) = if sel.start.0 <= sel.end.0 {
+                        (sel.start.0 as usize, sel.end.0 as usize)
+                    } else {
+                        (sel.end.0 as usize, sel.start.0 as usize)
+                    };
+                    let (min_row, max_row) = if sel.start.1 <= sel.end.1 {
+                        (sel.start.1 as usize, sel.end.1 as usize)
+                    } else {
+                        (sel.end.1 as usize, sel.start.1 as usize)
+                    };
+                    let cols = grid.cols as usize;
+                    let max_row_clamped = max_row.min(grid.rows as usize - 1);
+                    let max_col_clamped = max_col.min(cols - 1);
+                    let mut lines: Vec<String> = Vec::new();
+                    for row in min_row..=max_row_clamped {
+                        let row_start = row * cols;
+                        let line: String = grid.cells
+                            [row_start + min_col..=row_start + max_col_clamped]
+                            .iter()
+                            .map(|c| if c.ch == '\0' { ' ' } else { c.ch })
+                            .collect::<String>()
+                            .trim_end()
+                            .to_string();
+                        lines.push(line);
+                    }
+                    let text = lines.join("\n");
+                    let _ = writer
+                        .send(orbit_protocol::ClientMessage::CopyToClipboard { text })
+                        .await;
+                }
+                app.selection = None;
+            }
+        }
         "maximize" | "move_up" | "move_down" | "rename_space" | "close_space" | "new_space" => {}
         _ => {}
     }
@@ -175,6 +228,10 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
 
     match &mut app.mode {
         InputMode::Normal => {
+            if app.selection.is_some() {
+                app.selection = None;
+                app.needs_redraw = true;
+            }
             if is_prefix_key(&key) {
                 app.mode = InputMode::CommandPalette {
                     search: String::new(),
@@ -500,12 +557,7 @@ async fn handle_mouse(
                 return;
             }
 
-            let pane_area = ratatui::layout::Rect {
-                x: sidebar_w,
-                y: 1,
-                width: term_w.saturating_sub(sidebar_w + agent_w),
-                height: term_h.saturating_sub(3),
-            };
+            let pane_area = content_area(term_size, app);
             let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
             for (pid, rect) in &areas {
                 if mouse.column >= rect.x
@@ -520,6 +572,21 @@ async fn handle_mouse(
                             pane_id: *pid,
                         })
                         .await;
+                    // Start selection at inner cell coords (account for border)
+                    let inner_x = rect.x + 1;
+                    let inner_y = rect.y + 1;
+                    if mouse.column >= inner_x && mouse.row >= inner_y {
+                        let col = mouse.column - inner_x;
+                        let row = mouse.row - inner_y;
+                        app.selection = Some(crate::app::Selection {
+                            pane_id: *pid,
+                            start: (col, row),
+                            end: (col, row),
+                            active: true,
+                        });
+                    } else {
+                        app.selection = None;
+                    }
                     app.needs_redraw = true;
                     return;
                 }
@@ -557,6 +624,48 @@ async fn handle_mouse(
                     ContextMenuTarget::Pane(app.active_pane)
                 };
                 app.open_context_menu(mouse.column, mouse.row, target);
+            }
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            // Update selection end during drag, clamping to pane inner area
+            let drag_info = app
+                .selection
+                .as_ref()
+                .filter(|s| s.active)
+                .map(|s| s.pane_id);
+            if let Some(sel_pane_id) = drag_info {
+                let pane_area = content_area(term_size, app);
+                let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+                for (pid, rect) in &areas {
+                    if *pid == sel_pane_id {
+                        let inner_x = rect.x + 1;
+                        let inner_y = rect.y + 1;
+                        let inner_w = rect.width.saturating_sub(2);
+                        let inner_h = rect.height.saturating_sub(2);
+                        let col = mouse
+                            .column
+                            .saturating_sub(inner_x)
+                            .min(inner_w.saturating_sub(1));
+                        let row = mouse
+                            .row
+                            .saturating_sub(inner_y)
+                            .min(inner_h.saturating_sub(1));
+                        if let Some(sel) = &mut app.selection {
+                            sel.end = (col, row);
+                            app.needs_redraw = true;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            if let Some(sel) = &mut app.selection {
+                sel.active = false;
+                if sel.start == sel.end {
+                    app.selection = None;
+                }
+                app.needs_redraw = true;
             }
         }
         MouseEventKind::ScrollUp => {
