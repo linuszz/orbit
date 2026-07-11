@@ -629,6 +629,7 @@ impl App {
             }
             ServerEvent::AgentCreated(info) => {
                 self.agents.push(info.clone());
+                self.agent_panel_visible = true;
                 self.needs_redraw = true;
             }
             ServerEvent::AgentRemoved(id) => {

@@ -6,9 +6,9 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
     Arc,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use orbit_protocol::{AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
+use orbit_protocol::{AgentDetail, AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
 use tokio::sync::{broadcast, RwLock};
 use tracing::debug;
 
@@ -73,10 +73,13 @@ impl AgentRegistry {
 
         #[cfg(target_os = "linux")]
         tokio::spawn(async move {
-            let mut tracked: HashMap<u32, AgentId> = HashMap::new();
+            // pid → (AgentId, start_time)
+            let mut tracked: HashMap<u32, (AgentId, Instant)> = HashMap::new();
+            let mut poll_count: u32 = 0;
 
             loop {
                 tokio::time::sleep(Duration::from_millis(500)).await;
+                poll_count += 1;
 
                 if !process_exists(shell_pid) {
                     break;
@@ -102,7 +105,7 @@ impl AgentRegistry {
                             status: AgentStatus::Working,
                             detail: None,
                         };
-                        tracked.insert(*cpid, id);
+                        tracked.insert(*cpid, (id, Instant::now()));
                         self.agents.write().await.push(info.clone());
                         self.pid_map.write().await.insert(id, *cpid);
                         let _ = self.event_bus.send(ServerEvent::AgentCreated(info));
@@ -114,7 +117,7 @@ impl AgentRegistry {
                 let exited: Vec<(u32, AgentId)> = tracked
                     .iter()
                     .filter(|(pid, _)| !child_set.contains(pid))
-                    .map(|(&pid, &id)| (pid, id))
+                    .map(|(&pid, &(id, _))| (pid, id))
                     .collect();
 
                 for (cpid, agent_id) in exited {
@@ -141,10 +144,32 @@ impl AgentRegistry {
                         let _ = registry.event_bus.send(ServerEvent::AgentRemoved(agent_id));
                     });
                 }
+
+                // Every 10 polls (5s) emit duration updates for active agents.
+                if poll_count % 10 == 0 {
+                    for (agent_id, start) in tracked.values() {
+                        let duration_s = start.elapsed().as_secs() as u32;
+                        {
+                            let mut agents = self.agents.write().await;
+                            if let Some(a) = agents.iter_mut().find(|a| a.id == *agent_id) {
+                                let d = a.detail.get_or_insert_with(Default::default);
+                                d.duration_s = duration_s;
+                            }
+                        }
+                        let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
+                            agent_id: *agent_id,
+                            new_status: AgentStatus::Working,
+                            detail: Some(AgentDetail {
+                                duration_s,
+                                ..Default::default()
+                            }),
+                        });
+                    }
+                }
             }
 
             // Shell exited — mark any remaining tracked agents as done.
-            for (cpid, agent_id) in &tracked {
+            for (cpid, (agent_id, _)) in &tracked {
                 {
                     let mut agents = self.agents.write().await;
                     if let Some(a) = agents.iter_mut().find(|a| a.id == *agent_id) {

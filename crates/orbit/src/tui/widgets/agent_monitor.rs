@@ -61,6 +61,16 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
+fn format_duration(secs: u32) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .style(Style::default().bg(BG_SECONDARY))
@@ -288,12 +298,32 @@ fn render_card(
         );
     }
 
-    // Row 1: " " + model (w-1 cols)
+    // Row 1: " " + model (left) + duration (right-aligned) — total w cols
     {
-        let model = truncate_str(&agent.model, w.saturating_sub(1) as usize);
-        let model_text = format!(" {:<width$}", model, width = w.saturating_sub(1) as usize);
+        let duration_s = agent.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
+        let dur_str = if duration_s > 0 {
+            format_duration(duration_s)
+        } else {
+            String::new()
+        };
+        let inner_w = w.saturating_sub(1) as usize; // 1 leading space
+        let model_max = if dur_str.is_empty() {
+            inner_w
+        } else {
+            inner_w.saturating_sub(dur_str.len() + 1) // space before duration
+        };
+        let model = truncate_str(&agent.model, model_max);
+        let model_text = if dur_str.is_empty() {
+            format!(" {:<width$}", model, width = inner_w)
+        } else {
+            let pad = inner_w.saturating_sub(model.len() + dur_str.len());
+            format!(" {}{}{}", model, " ".repeat(pad), dur_str)
+        };
         frame.render_widget(
-            Paragraph::new(Span::styled(model_text, Style::default().fg(FG_MUTED))),
+            Paragraph::new(Line::from(vec![Span::styled(
+                model_text,
+                Style::default().fg(FG_MUTED),
+            )])),
             Rect {
                 x,
                 y: y + 1,
