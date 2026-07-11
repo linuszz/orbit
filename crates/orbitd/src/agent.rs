@@ -8,7 +8,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use orbit_protocol::{AgentDetail, AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
+use orbit_protocol::{AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
 use tokio::sync::{broadcast, RwLock};
 use tracing::debug;
 
@@ -149,20 +149,20 @@ impl AgentRegistry {
                 if poll_count % 10 == 0 {
                     for (agent_id, start) in tracked.values() {
                         let duration_s = start.elapsed().as_secs() as u32;
-                        {
+                        // Read current status and update duration_s in a single write lock.
+                        let (current_status, current_detail) = {
                             let mut agents = self.agents.write().await;
-                            if let Some(a) = agents.iter_mut().find(|a| a.id == *agent_id) {
-                                let d = a.detail.get_or_insert_with(Default::default);
-                                d.duration_s = duration_s;
-                            }
-                        }
+                            let Some(a) = agents.iter_mut().find(|a| a.id == *agent_id) else {
+                                continue;
+                            };
+                            let d = a.detail.get_or_insert_with(Default::default);
+                            d.duration_s = duration_s;
+                            (a.status.clone(), a.detail.clone().unwrap())
+                        };
                         let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
                             agent_id: *agent_id,
-                            new_status: AgentStatus::Working,
-                            detail: Some(AgentDetail {
-                                duration_s,
-                                ..Default::default()
-                            }),
+                            new_status: current_status,
+                            detail: Some(current_detail),
                         });
                     }
                 }

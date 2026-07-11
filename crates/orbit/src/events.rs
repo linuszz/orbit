@@ -3,7 +3,7 @@ use crossterm::event::{
     Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
 };
 use futures::StreamExt;
-use orbit_protocol::{ClientMessage, SplitDir};
+use orbit_protocol::{AgentLaunchRequest, ClientMessage, SplitDir};
 use tracing::debug;
 
 use crate::app::{AgentHover, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
@@ -632,7 +632,22 @@ async fn handle_mouse(
                     if mouse.column >= term_w.saturating_sub(4)
                         && mouse.column <= term_w.saturating_sub(2)
                     {
-                        // [+] add — placeholder
+                        // [+] add — launch an agent in a new split pane
+                        let space_id = app
+                            .spaces
+                            .get(app.active_space_idx)
+                            .map(|s| s.space_id)
+                            .unwrap_or_default();
+                        let _ = writer
+                            .send(ClientMessage::AgentLaunch {
+                                config: AgentLaunchRequest {
+                                    name: "claude".to_string(),
+                                    model: String::new(),
+                                    cwd: app.space_path.clone(),
+                                    space_id,
+                                },
+                            })
+                            .await;
                         app.needs_redraw = true;
                         return;
                     }
@@ -671,21 +686,44 @@ async fn handle_mouse(
                             let agent_pane = agent.pane_id;
                             let agent_status = agent.status.clone();
                             match (s, &agent_status) {
-                                // Slot 0: [View] — focus agent's pane
+                                // Slot 0: [View] — focus agent's pane, switching tabs if needed
                                 (0, _) => {
                                     if let Some(pane_id) = agent_pane {
+                                        let found = app
+                                            .tabs
+                                            .iter()
+                                            .enumerate()
+                                            .find(|(_, t)| t.pane_tree.leaves().contains(&pane_id));
+                                        let tab_id = found
+                                            .map(|(_, t)| t.id)
+                                            .unwrap_or(app.active_tab_id);
+                                        let tab_idx =
+                                            found.map(|(i, _)| i).unwrap_or(app.active_tab);
                                         app.active_pane = pane_id;
+                                        app.active_tab = tab_idx;
+                                        app.active_tab_id = tab_id;
+                                        app.selection = None;
                                         let _ = writer
-                                            .send(ClientMessage::FocusPane {
-                                                tab_id: app.active_tab_id,
-                                                pane_id,
-                                            })
+                                            .send(ClientMessage::FocusPane { tab_id, pane_id })
                                             .await;
                                     }
                                 }
-                                // Slot 1: [Stop] (Working) or [Abrt] (Blocked)
-                                (1, orbit_protocol::AgentStatus::Working)
-                                | (2, orbit_protocol::AgentStatus::Blocked) => {
+                                // Slot 1: [Stop] (Working)
+                                (1, orbit_protocol::AgentStatus::Working) => {
+                                    let _ =
+                                        writer.send(ClientMessage::AgentAbort { agent_id }).await;
+                                }
+                                // Slot 1: [Resp] (Blocked) — send response to unblock agent
+                                (1, orbit_protocol::AgentStatus::Blocked) => {
+                                    let _ = writer
+                                        .send(ClientMessage::AgentRespond {
+                                            agent_id,
+                                            response: String::new(),
+                                        })
+                                        .await;
+                                }
+                                // Slot 2: [Abrt] (Blocked)
+                                (2, orbit_protocol::AgentStatus::Blocked) => {
                                     let _ =
                                         writer.send(ClientMessage::AgentAbort { agent_id }).await;
                                 }
@@ -696,15 +734,24 @@ async fn handle_mouse(
                         return;
                     }
                     if mouse.row >= card_row_start && mouse.row < card_row_start + 5 {
-                        // Click on card body (not buttons) — focus pane
+                        // Click on card body (not buttons) — focus pane, switching tabs if needed
                         let agent_pane = agent.pane_id;
                         if let Some(pane_id) = agent_pane {
+                            let found = app
+                                .tabs
+                                .iter()
+                                .enumerate()
+                                .find(|(_, t)| t.pane_tree.leaves().contains(&pane_id));
+                            let tab_id =
+                                found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
+                            let tab_idx =
+                                found.map(|(i, _)| i).unwrap_or(app.active_tab);
                             app.active_pane = pane_id;
+                            app.active_tab = tab_idx;
+                            app.active_tab_id = tab_id;
+                            app.selection = None;
                             let _ = writer
-                                .send(ClientMessage::FocusPane {
-                                    tab_id: app.active_tab_id,
-                                    pane_id,
-                                })
+                                .send(ClientMessage::FocusPane { tab_id, pane_id })
                                 .await;
                         }
                         app.needs_redraw = true;
