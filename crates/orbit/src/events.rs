@@ -58,12 +58,19 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
 }
 
 fn content_area(term_size: ratatui::layout::Rect, app: &App) -> ratatui::layout::Rect {
-    let sidebar_w = if app.sidebar_visible {
+    // §6.7: Compact (<80 cols) collapses sidebar and hides agent panel.
+    let sidebar_w = if term_size.width < 80 {
+        SIDEBAR_COLLAPSED_W
+    } else if app.sidebar_visible {
         SIDEBAR_W
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = if app.agent_panel_visible { AGENT_W } else { 0 };
+    let agent_w = if app.agent_panel_visible && term_size.width >= 80 {
+        AGENT_W
+    } else {
+        0
+    };
     ratatui::layout::Rect {
         x: sidebar_w,
         y: 1, // below tab bar
@@ -768,12 +775,19 @@ async fn handle_mouse(
         return;
     }
 
-    let sidebar_w: u16 = if app.sidebar_visible {
+    // §6.7: Compact (<80 cols) collapses sidebar and hides agent panel.
+    let sidebar_w: u16 = if term_size.width < 80 {
+        SIDEBAR_COLLAPSED_W
+    } else if app.sidebar_visible {
         SIDEBAR_W
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = if app.agent_panel_visible { AGENT_W } else { 0 };
+    let agent_w = if app.agent_panel_visible && term_size.width >= 80 {
+        AGENT_W
+    } else {
+        0
+    };
     let term_w = term_size.width;
     let term_h = term_size.height;
 
@@ -878,8 +892,11 @@ async fn handle_mouse(
                 return;
             }
 
-            // Agent panel clicks
-            if app.agent_panel_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
+            // Agent panel clicks (hidden in compact mode <80 cols)
+            if app.agent_panel_visible
+                && term_w >= 80
+                && mouse.column >= term_w.saturating_sub(AGENT_W)
+            {
                 let panel_x = term_w.saturating_sub(AGENT_W);
                 let inner_x = panel_x + 1;
                 let col_in_inner = mouse.column.saturating_sub(inner_x);
@@ -1225,7 +1242,8 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollUp => {
-            if app.agent_panel_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
+            let agent_visible = app.agent_panel_visible && term_w >= 80;
+            if agent_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
                 app.agent_scroll_offset = app.agent_scroll_offset.saturating_sub(1);
                 app.needs_redraw = true;
             } else if let InputMode::Scroll { offset } = &mut app.mode {
@@ -1234,7 +1252,8 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollDown => {
-            if app.agent_panel_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
+            let agent_visible = app.agent_panel_visible && term_w >= 80;
+            if agent_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
                 let max_scroll = app.agents.len().saturating_sub(1);
                 app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max_scroll);
                 app.needs_redraw = true;
@@ -1296,8 +1315,11 @@ async fn handle_mouse(
                 app.needs_redraw = true;
             }
 
-            // Agent panel hover
-            if app.agent_panel_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
+            // Agent panel hover (only when not in compact mode)
+            if app.agent_panel_visible
+                && term_w >= 80
+                && mouse.column >= term_w.saturating_sub(AGENT_W)
+            {
                 let panel_x = term_w.saturating_sub(AGENT_W);
                 let inner_x = panel_x + 1;
                 let col_in_inner = mouse.column.saturating_sub(inner_x);

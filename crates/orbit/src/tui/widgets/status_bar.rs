@@ -1,3 +1,4 @@
+use orbit_protocol::AgentStatus;
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -59,7 +60,63 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ));
     spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
 
-    spans.push(Span::styled("○ idle", Style::default().fg(ACCENT_IDLE)));
+    // Live satellite fleet summary — highest-severity status wins.
+    let n_blocked = app
+        .agents
+        .iter()
+        .filter(|a| a.status == AgentStatus::Blocked)
+        .count();
+    let n_error = app
+        .agents
+        .iter()
+        .filter(|a| a.status == AgentStatus::Error)
+        .count();
+    let n_working = app
+        .agents
+        .iter()
+        .filter(|a| a.status == AgentStatus::Working)
+        .count();
+    let n_idle = app
+        .agents
+        .iter()
+        .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done))
+        .count();
+
+    let (icon, label, color) = if n_blocked > 0 {
+        let s = if n_blocked == 1 {
+            "eclipse".to_string()
+        } else {
+            format!("{n_blocked} eclipse")
+        };
+        ("\u{25CE}", s, ACCENT_BLOCKED)
+    } else if n_error > 0 {
+        let s = if n_error == 1 {
+            "debris".to_string()
+        } else {
+            format!("{n_error} debris")
+        };
+        ("\u{25C9}", s, ACCENT_ERROR)
+    } else if n_working > 0 {
+        let s = if n_working == 1 {
+            "transmitting".to_string()
+        } else {
+            format!("{n_working} transmitting")
+        };
+        ("\u{25CF}", s, ACCENT)
+    } else if n_idle > 0 {
+        let s = if n_idle == 1 {
+            "standby".to_string()
+        } else {
+            format!("{n_idle} standby")
+        };
+        ("\u{25CB}", s, ACCENT_IDLE)
+    } else {
+        ("\u{25CB}", "idle".to_string(), ACCENT_IDLE)
+    };
+    spans.push(Span::styled(
+        format!("{icon} {label}"),
+        Style::default().fg(color),
+    ));
 
     if !app.space_path.is_empty() && app.space_path != "." {
         spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
