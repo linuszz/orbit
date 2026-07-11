@@ -140,16 +140,15 @@ impl AgentRegistry {
                     event = rx.recv() => {
                         match event {
                             Ok(ServerEvent::PaneOutput { pane_id: ev_pane, data })
-                                if ev_pane == pane_id && !tracked.is_empty() =>
+                                if ev_pane == pane_id =>
                             {
                                 // Check last 256 bytes for prompt patterns to avoid
                                 // matching historical content in a large chunk.
                                 let tail_start = data.len().saturating_sub(256);
                                 let tail = String::from_utf8_lossy(&data[tail_start..]);
-                                let is_prompt =
-                                    BLOCK_PATTERNS.iter().any(|p| tail.contains(p));
 
-                                // Update last meaningful output line for the activity display.
+                                // Update last meaningful output line (always, so it's ready
+                                // when an agent is detected mid-session).
                                 if let Some(line) = tail
                                     .lines()
                                     .map(|l| l.trim())
@@ -157,6 +156,14 @@ impl AgentRegistry {
                                 {
                                     last_output_line = strip_ansi(line);
                                 }
+
+                                // Block-pattern scan only meaningful when agents are tracked.
+                                if tracked.is_empty() {
+                                    continue;
+                                }
+
+                                let is_prompt =
+                                    BLOCK_PATTERNS.iter().any(|p| tail.contains(p));
 
                                 // Scan for progress percentage ("75%" or "75.5%") in output tail.
                                 // Updated value is included in the next 5 s metrics cycle.
