@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::{App, InputMode};
 use crate::tui::theme::*;
+use crate::tui::widgets::agent_monitor::{blocked_pulse_color, working_pulse_color};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let bg = Block::default()
@@ -103,7 +104,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("{n_blocked} eclipse")
         };
-        ("\u{25CE}", s, ACCENT_BLOCKED)
+        // Blocked uses animated pulse (same helper as the agent card icon).
+        ("\u{25CE}", s, blocked_pulse_color(app.tick_count))
     } else if n_error > 0 {
         let s = if n_error == 1 {
             "debris".to_string()
@@ -117,7 +119,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("{n_working} transmitting")
         };
-        ("\u{25CF}", s, ACCENT)
+        // Working uses animated pulse.
+        ("\u{25CF}", s, working_pulse_color(app.tick_count))
     } else if n_idle > 0 {
         let s = if n_idle == 1 {
             "standby".to_string()

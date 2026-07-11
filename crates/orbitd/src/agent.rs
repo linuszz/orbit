@@ -29,6 +29,7 @@ const SCRIPT_RUNNERS: &[&str] = &["node", "npx", "python", "python3", "deno", "b
 
 /// Output patterns that indicate an agent is waiting for user input (Blocked/Eclipse state).
 const BLOCK_PATTERNS: &[&str] = &[
+    // Standard confirmation prompts
     "(y/n)",
     "(Y/N)",
     "(yes/no)",
@@ -42,6 +43,30 @@ const BLOCK_PATTERNS: &[&str] = &[
     "press any key",
     "Continue?",
     "Proceed?",
+    // Claude Code specific patterns
+    "Do you want to proceed",
+    "Allow this action",
+    "Allow Claude to",
+    "approve this",
+    "Approve this",
+    "confirm this",
+    "Confirm this",
+    // Aider patterns
+    "Add these files",
+    "Create new file",
+    "Apply edits",
+    // Generic shell/readline prompts that need input
+    "Enter your",
+    "Enter the",
+    "Type your",
+    "Password:",
+    "password:",
+    "Passphrase:",
+    "passphrase:",
+    // npm/yarn interactive
+    "package name:",
+    "version:",
+    "description:",
 ];
 
 pub struct AgentRegistry {
