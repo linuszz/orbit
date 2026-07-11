@@ -133,6 +133,19 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
                     ClientMessage::AgentAbort { agent_id } => {
                         space_manager.agent_registry.abort_agent(agent_id).await;
                     }
+                    ClientMessage::AgentRemove { agent_id } => {
+                        space_manager.agent_registry.remove_agent(agent_id).await;
+                    }
+                    ClientMessage::AgentSkip { agent_id } => {
+                        let agents = space_manager.agent_registry.get_agents().await;
+                        if let Some(agent) = agents.iter().find(|a| a.id == agent_id) {
+                            if let Some(pane_id) = agent.pane_id {
+                                let session = space_manager.active_session().await;
+                                let active_tab_id = *session.active_tab.read().await;
+                                session.send_input(active_tab_id, pane_id, b"\r".to_vec()).await;
+                            }
+                        }
+                    }
                     ClientMessage::AgentRespond { agent_id, response } => {
                         let agents = space_manager.agent_registry.get_agents().await;
                         if let Some(agent) = agents.iter().find(|a| a.id == agent_id) {

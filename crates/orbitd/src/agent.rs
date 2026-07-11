@@ -47,6 +47,14 @@ impl AgentRegistry {
         self.agents.read().await.clone()
     }
 
+    /// Remove an agent from the visible list immediately (user-driven dismiss).
+    pub async fn remove_agent(&self, agent_id: AgentId) {
+        self.agents.write().await.retain(|a| a.id != agent_id);
+        self.pid_map.write().await.remove(&agent_id);
+        let _ = self.event_bus.send(ServerEvent::AgentRemoved(agent_id));
+        debug!("agent removed by user: id={agent_id:?}");
+    }
+
     /// Kill the agent process with SIGTERM.
     pub async fn abort_agent(&self, agent_id: AgentId) {
         let pid = {

@@ -83,6 +83,9 @@ pub enum ClientMessage {
     AgentLaunch {
         config: crate::AgentLaunchRequest,
     },
+    AgentRemove {
+        agent_id: crate::AgentId,
+    },
 
     RequestFullState,
 

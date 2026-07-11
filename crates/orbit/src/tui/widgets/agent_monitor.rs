@@ -91,7 +91,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // --- Header ---
     {
         let n = app.agents.len();
-        let badge = format!("[{}]", n);
+        let badge = if app.agent_scroll_offset > 0 {
+            format!("[{}/{}]", n.saturating_sub(app.agent_scroll_offset), n)
+        } else {
+            format!("[{}]", n)
+        };
         let badge_color = if any_blocked {
             ACCENT_BLOCKED
         } else {
@@ -234,13 +238,25 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             }
         }
     } else {
-        for (card_idx, agent) in app.agents.iter().enumerate() {
+        let visible_agents: Vec<&AgentInfo> =
+            app.agents.iter().skip(app.agent_scroll_offset).collect();
+        let total = app.agents.len();
+        for (card_idx, agent) in visible_agents.iter().enumerate() {
             if y + 5 > area.y + area.height {
+                // Show "▼ N more" indicator when cards are truncated.
+                let remaining = total - app.agent_scroll_offset - card_idx;
+                if remaining > 0 && y <= area.y + area.height {
+                    let more_text = format!(" \u{25BE} {} more", remaining);
+                    frame.render_widget(
+                        Paragraph::new(Span::styled(more_text, Style::default().fg(FG_MUTED))),
+                        Rect { x: ix, y: area.y + area.height - 1, width: iw, height: 1 },
+                    );
+                }
                 break;
             }
             render_card(frame, ix, y, iw, agent, card_idx, app);
             y += 5;
-            if card_idx + 1 < app.agents.len() && y < area.y + area.height {
+            if card_idx + 1 < visible_agents.len() && y < area.y + area.height {
                 frame.render_widget(
                     Line::from(Span::styled(
                         "\u{2500}".repeat(iw as usize),

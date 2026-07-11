@@ -159,7 +159,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let input = format!("> {}{}", modal.response, cursor);
         let input_truncated = truncate_str(&input, block_w as usize);
         let input_padded = format!("{:<width$}", input_truncated, width = block_w as usize);
-        let input_display = format!("\u{2502}{input_padded}\u{2502}");
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled("\u{2502}", Style::default().fg(ACCENT)),
@@ -168,7 +167,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ])),
             Rect { x: msg_inner_x, y: row, width: block_w + 2, height: 1 },
         );
-        let _ = input_display;
         row += 1;
         let border_bot = format!(
             "\u{2514}{}\u{2518}",

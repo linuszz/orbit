@@ -199,6 +199,7 @@ pub struct App {
     pub selection: Option<Selection>,
     pub agents: Vec<AgentInfo>,
     pub agent_hovered: Option<AgentHover>,
+    pub agent_scroll_offset: usize,
     pub eclipse_modal: Option<EclipseModalState>,
 }
 
@@ -327,6 +328,7 @@ impl App {
             selection: None,
             agents: state.agents.clone(),
             agent_hovered: None,
+            agent_scroll_offset: 0,
             eclipse_modal: None,
         }
     }
@@ -664,6 +666,9 @@ impl App {
                         self.agent_hovered = None;
                     }
                 }
+                self.agent_scroll_offset = self
+                    .agent_scroll_offset
+                    .min(self.agents.len().saturating_sub(1));
                 self.needs_redraw = true;
             }
             ServerEvent::AgentStatusChanged {

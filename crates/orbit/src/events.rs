@@ -495,6 +495,66 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
     Ok(())
 }
 
+async fn handle_eclipse_modal_mouse(
+    mouse: crossterm::event::MouseEvent,
+    app: &mut App,
+    writer: &IpcWriter,
+    term_size: ratatui::layout::Rect,
+) {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return;
+    }
+    let Some(modal) = &app.eclipse_modal else {
+        return;
+    };
+    let agent_id = modal.agent_id;
+
+    // Compute modal geometry (mirrors eclipse_modal widget).
+    let modal_w = 64u16.min(term_size.width.saturating_sub(4));
+    let modal_h = 16u16.min(term_size.height.saturating_sub(4));
+    let modal_x = (term_size.width.saturating_sub(modal_w)) / 2;
+    let modal_y = (term_size.height.saturating_sub(modal_h)) / 2;
+    let inner_x = modal_x + 1;
+
+    // Dismiss on click outside the modal.
+    if mouse.column < modal_x
+        || mouse.column >= modal_x + modal_w
+        || mouse.row < modal_y
+        || mouse.row >= modal_y + modal_h
+    {
+        app.eclipse_modal = None;
+        app.needs_redraw = true;
+        return;
+    }
+
+    // Button row: modal_y + modal_h - 3  (blank before it, border after it).
+    let btn_row = modal_y + modal_h.saturating_sub(3);
+    if mouse.row != btn_row {
+        return;
+    }
+
+    // Column ranges relative to inner_x (mirrors render: " [Send]  [Cancel]  [Abort Eclipse]").
+    let col_in = mouse.column.saturating_sub(inner_x);
+    if (1..=6).contains(&col_in) {
+        // [Send]
+        let response = modal.response.clone();
+        app.eclipse_modal = None;
+        let _ = writer
+            .send(ClientMessage::AgentRespond { agent_id, response })
+            .await;
+        app.needs_redraw = true;
+    } else if (9..=16).contains(&col_in) {
+        // [Cancel]
+        app.eclipse_modal = None;
+        app.needs_redraw = true;
+    } else if (19..=33).contains(&col_in) {
+        // [Abort Eclipse]
+        app.eclipse_modal = None;
+        let _ = writer.send(ClientMessage::AgentAbort { agent_id }).await;
+        app.needs_redraw = true;
+    }
+}
+
 async fn handle_mouse(
     mouse: crossterm::event::MouseEvent,
     app: &mut App,
@@ -547,6 +607,12 @@ async fn handle_mouse(
             }
             _ => {}
         }
+        return;
+    }
+
+    // Eclipse modal is open — only forward clicks to modal buttons.
+    if app.eclipse_modal.is_some() {
+        handle_eclipse_modal_mouse(mouse, app, writer, term_size).await;
         return;
     }
 
@@ -716,11 +782,19 @@ async fn handle_mouse(
                     return;
                 }
 
-                // Card button clicks
+                // Card button clicks — iterate only the visible (scrolled) agents.
                 let base_row =
                     crate::tui::widgets::agent_monitor::card_start_row(0, any_blocked, 0);
                 let mut card_row_start = base_row;
-                for agent in app.agents.iter() {
+                let scroll = app.agent_scroll_offset;
+                // Collect (id, pane_id, status) so we can drop the borrow before mutations.
+                let visible: Vec<(orbit_protocol::AgentId, Option<orbit_protocol::PaneId>, orbit_protocol::AgentStatus)> = app
+                    .agents
+                    .iter()
+                    .skip(scroll)
+                    .map(|a| (a.id, a.pane_id, a.status.clone()))
+                    .collect();
+                for (agent_id, agent_pane, agent_status) in visible {
                     let btn_row = card_row_start + 4;
                     if mouse.row == btn_row {
                         // Button row of this card
@@ -734,18 +808,13 @@ async fn handle_mouse(
                             None
                         };
                         if let Some(s) = slot {
-                            let agent_id = agent.id;
-                            let agent_pane = agent.pane_id;
-                            let agent_status = agent.status.clone();
                             match (s, &agent_status) {
                                 // Slot 0: [View] — focus agent's pane, switching tabs if needed
                                 (0, _) => {
                                     if let Some(pane_id) = agent_pane {
-                                        let found = app
-                                            .tabs
-                                            .iter()
-                                            .enumerate()
-                                            .find(|(_, t)| t.pane_tree.leaves().contains(&pane_id));
+                                        let found = app.tabs.iter().enumerate().find(|(_, t)| {
+                                            t.pane_tree.leaves().contains(&pane_id)
+                                        });
                                         let tab_id = found
                                             .map(|(_, t)| t.id)
                                             .unwrap_or(app.active_tab_id);
@@ -765,6 +834,26 @@ async fn handle_mouse(
                                     let _ =
                                         writer.send(ClientMessage::AgentAbort { agent_id }).await;
                                 }
+                                // Slot 2: [Chat] (Working) — focus pane to interact
+                                (2, orbit_protocol::AgentStatus::Working) => {
+                                    if let Some(pane_id) = agent_pane {
+                                        let found = app.tabs.iter().enumerate().find(|(_, t)| {
+                                            t.pane_tree.leaves().contains(&pane_id)
+                                        });
+                                        let tab_id = found
+                                            .map(|(_, t)| t.id)
+                                            .unwrap_or(app.active_tab_id);
+                                        let tab_idx =
+                                            found.map(|(i, _)| i).unwrap_or(app.active_tab);
+                                        app.active_pane = pane_id;
+                                        app.active_tab = tab_idx;
+                                        app.active_tab_id = tab_id;
+                                        app.selection = None;
+                                        let _ = writer
+                                            .send(ClientMessage::FocusPane { tab_id, pane_id })
+                                            .await;
+                                    }
+                                }
                                 // Slot 1: [Resp] (Blocked) — open Eclipse modal
                                 (1, orbit_protocol::AgentStatus::Blocked) => {
                                     crate::tui::widgets::eclipse_modal::open(app, agent_id);
@@ -774,6 +863,60 @@ async fn handle_mouse(
                                     let _ =
                                         writer.send(ClientMessage::AgentAbort { agent_id }).await;
                                 }
+                                // Slot 1: [Chat] (Idle) / Slot 1: [Chat] (Done) — focus pane
+                                (1, orbit_protocol::AgentStatus::Idle)
+                                | (1, orbit_protocol::AgentStatus::Done) => {
+                                    if let Some(pane_id) = agent_pane {
+                                        let found = app.tabs.iter().enumerate().find(|(_, t)| {
+                                            t.pane_tree.leaves().contains(&pane_id)
+                                        });
+                                        let tab_id = found
+                                            .map(|(_, t)| t.id)
+                                            .unwrap_or(app.active_tab_id);
+                                        let tab_idx =
+                                            found.map(|(i, _)| i).unwrap_or(app.active_tab);
+                                        app.active_pane = pane_id;
+                                        app.active_tab = tab_idx;
+                                        app.active_tab_id = tab_id;
+                                        app.selection = None;
+                                        let _ = writer
+                                            .send(ClientMessage::FocusPane { tab_id, pane_id })
+                                            .await;
+                                    }
+                                }
+                                // Slot 2: [Rmov] (Idle / Done) — dismiss from list
+                                (2, orbit_protocol::AgentStatus::Idle)
+                                | (2, orbit_protocol::AgentStatus::Done) => {
+                                    let _ = writer
+                                        .send(ClientMessage::AgentRemove { agent_id })
+                                        .await;
+                                }
+                                // Slot 1: [Rstr] (Error) — focus pane to inspect
+                                (1, orbit_protocol::AgentStatus::Error) => {
+                                    if let Some(pane_id) = agent_pane {
+                                        let found = app.tabs.iter().enumerate().find(|(_, t)| {
+                                            t.pane_tree.leaves().contains(&pane_id)
+                                        });
+                                        let tab_id = found
+                                            .map(|(_, t)| t.id)
+                                            .unwrap_or(app.active_tab_id);
+                                        let tab_idx =
+                                            found.map(|(i, _)| i).unwrap_or(app.active_tab);
+                                        app.active_pane = pane_id;
+                                        app.active_tab = tab_idx;
+                                        app.active_tab_id = tab_id;
+                                        app.selection = None;
+                                        let _ = writer
+                                            .send(ClientMessage::FocusPane { tab_id, pane_id })
+                                            .await;
+                                    }
+                                }
+                                // Slot 2: [Rmov] (Error) — dismiss from list
+                                (2, orbit_protocol::AgentStatus::Error) => {
+                                    let _ = writer
+                                        .send(ClientMessage::AgentRemove { agent_id })
+                                        .await;
+                                }
                                 _ => {}
                             }
                         }
@@ -782,7 +925,6 @@ async fn handle_mouse(
                     }
                     if mouse.row >= card_row_start && mouse.row < card_row_start + 5 {
                         // Click on card body (not buttons) — focus pane, switching tabs if needed
-                        let agent_pane = agent.pane_id;
                         if let Some(pane_id) = agent_pane {
                             let found = app
                                 .tabs
@@ -941,13 +1083,24 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollUp => {
-            if let InputMode::Scroll { offset } = &mut app.mode {
+            if app.agent_panel_visible
+                && mouse.column >= term_w.saturating_sub(AGENT_W)
+            {
+                app.agent_scroll_offset = app.agent_scroll_offset.saturating_sub(1);
+                app.needs_redraw = true;
+            } else if let InputMode::Scroll { offset } = &mut app.mode {
                 *offset += 3;
                 app.needs_redraw = true;
             }
         }
         MouseEventKind::ScrollDown => {
-            if let InputMode::Scroll { offset } = &mut app.mode {
+            if app.agent_panel_visible
+                && mouse.column >= term_w.saturating_sub(AGENT_W)
+            {
+                let max_scroll = app.agents.len().saturating_sub(1);
+                app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max_scroll);
+                app.needs_redraw = true;
+            } else if let InputMode::Scroll { offset } = &mut app.mode {
                 *offset = offset.saturating_sub(3);
                 if *offset == 0 {
                     app.mode = InputMode::Normal;
@@ -1032,7 +1185,7 @@ async fn handle_mouse(
                         crate::tui::widgets::agent_monitor::card_start_row(0, any_blocked, 0);
                     let mut card_row_start = base_row;
                     let mut found = None;
-                    for (card_idx, _) in app.agents.iter().enumerate() {
+                    for (card_idx, _) in app.agents.iter().skip(app.agent_scroll_offset).enumerate() {
                         if mouse.row >= card_row_start && mouse.row < card_row_start + 5 {
                             let card_row = mouse.row - card_row_start;
                             if card_row == 4 {
