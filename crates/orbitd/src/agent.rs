@@ -98,6 +98,8 @@ impl AgentRegistry {
             let mut tracked: HashMap<u32, (AgentId, Instant)> = HashMap::new();
             // Last meaningful output line seen from this pane (shown in card row 2).
             let mut last_output_line = String::new();
+            // Last progress percentage detected in PTY output (0.0–1.0); sent in 5s cycle.
+            let mut last_progress_pct: Option<f32> = None;
             // pid → cpu ticks at last 5-second sample (for cpu% delta).
             let mut cpu_prev: HashMap<u32, u64> = HashMap::new();
             let mut cpu_prev_time = Instant::now();
@@ -129,6 +131,12 @@ impl AgentRegistry {
                                     .rfind(|l| !l.is_empty() && l.len() > 3)
                                 {
                                     last_output_line = line.to_string();
+                                }
+
+                                // Scan for progress percentage ("75%" or "75.5%") in output tail.
+                                // Updated value is included in the next 5 s metrics cycle.
+                                if let Some(pct) = extract_progress(&tail) {
+                                    last_progress_pct = Some(pct);
                                 }
 
                                 for (agent_id, _) in tracked.values() {
@@ -313,6 +321,10 @@ impl AgentRegistry {
                                     };
                                     let d = a.detail.get_or_insert_with(Default::default);
                                     d.duration_s = duration_s;
+                                    // Include latest detected progress percentage, if any.
+                                    if last_progress_pct.is_some() {
+                                        d.progress = last_progress_pct;
+                                    }
                                     (a.status.clone(), a.detail.clone().unwrap())
                                 };
                                 let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
@@ -559,4 +571,32 @@ fn process_exists(pid: u32) -> bool {
         let _ = pid;
         false
     }
+}
+
+/// Scan `text` for the last "N%" or "N.N%" pattern and return it as a fraction [0.0, 1.0].
+/// Only matches values in [0.0, 100.0]. Returns None if none found.
+fn extract_progress(text: &str) -> Option<f32> {
+    let bytes = text.as_bytes();
+    let mut last: Option<f32> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] == b'%' {
+                if let Ok(pct) = text[start..i].parse::<f32>() {
+                    if (0.0..=100.0).contains(&pct) {
+                        last = Some(pct / 100.0);
+                    }
+                }
+                i += 1;
+                continue;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    last
 }
