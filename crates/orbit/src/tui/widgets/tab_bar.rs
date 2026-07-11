@@ -23,16 +23,31 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         if used >= tab_width {
             break;
         }
-        let label = format!(" {} ", tab.name);
-        let style = if i == app.active_tab {
-            Style::default()
-                .fg(FG_PRIMARY)
-                .bg(BG_TERTIARY)
-                .add_modifier(Modifier::BOLD)
+        let is_active = i == app.active_tab;
+        let label = if is_active {
+            format!(" {}* ", tab.name)
         } else {
-            Style::default().fg(FG_MUTED)
+            format!(" {} ", tab.name)
         };
-        spans.push(Span::styled(label, style));
+        let (style, underline) = if is_active {
+            (
+                Style::default()
+                    .fg(FG_PRIMARY)
+                    .bg(BG_TERTIARY)
+                    .add_modifier(Modifier::BOLD),
+                true,
+            )
+        } else {
+            (Style::default().fg(FG_MUTED), false)
+        };
+        if underline {
+            spans.push(Span::styled(
+                label.clone(),
+                style.add_modifier(Modifier::UNDERLINED),
+            ));
+        } else {
+            spans.push(Span::styled(label, style));
+        }
         used += tab.name.len() + 3;
     }
 

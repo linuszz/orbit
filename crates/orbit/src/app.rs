@@ -149,6 +149,7 @@ pub struct App {
     pub show_help: bool,
     pub context_menu: Option<ContextMenu>,
     pub space_name: String,
+    pub space_path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -226,6 +227,9 @@ impl App {
             space_name: space
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| "default".to_string()),
+            space_path: space
+                .map(|s| s.path.clone())
+                .unwrap_or_else(|| ".".to_string()),
         }
     }
 
@@ -362,6 +366,8 @@ impl App {
                         }
                     }
                     self.active_pane = s.active_pane;
+                    self.space_name = s.name.clone();
+                    self.space_path = s.path.clone();
                 }
                 self.needs_redraw = true;
             }

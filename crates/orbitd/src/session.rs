@@ -218,6 +218,7 @@ impl SessionState {
         SpaceInfo {
             id: self.space_id,
             name: self.space_name.clone(),
+            path: self.cwd.clone(),
             panes: pane_infos,
             active_pane: active,
             layout: tree.clone(),

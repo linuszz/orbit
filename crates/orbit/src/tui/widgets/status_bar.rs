@@ -25,6 +25,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .bg(ACCENT)
                 .add_modifier(Modifier::BOLD),
         ));
+        spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
     }
 
     if let InputMode::Scroll { offset } = &app.mode {
@@ -35,9 +36,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .bg(ACCENT_IDLE)
                 .add_modifier(Modifier::BOLD),
         ));
+        spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
     }
 
-    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        "[SPACE] ",
+        Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
+    ));
     spans.push(Span::styled(
         &app.space_name,
         Style::default().fg(FG_SECONDARY),
@@ -48,10 +53,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         app.current_tab_name(),
         Style::default().fg(FG_MUTED),
     ));
-    spans.push(Span::styled("*", Style::default().fg(ACCENT)));
+    spans.push(Span::styled(
+        "*",
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+    ));
     spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
 
     spans.push(Span::styled("○ idle", Style::default().fg(ACCENT_IDLE)));
+
+    if !app.space_path.is_empty() && app.space_path != "." {
+        spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
+        spans.push(Span::styled(
+            &app.space_path,
+            Style::default().fg(FG_SECONDARY),
+        ));
+    }
 
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

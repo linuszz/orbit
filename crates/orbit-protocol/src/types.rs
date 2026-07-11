@@ -117,6 +117,7 @@ pub struct FullState {
 pub struct SpaceInfo {
     pub id: SpaceId,
     pub name: String,
+    pub path: String,
     pub panes: Vec<PaneInfo>,
     pub active_pane: PaneId,
     pub layout: PaneLayout,
