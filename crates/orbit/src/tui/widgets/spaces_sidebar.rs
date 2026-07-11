@@ -20,20 +20,20 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     let mut y = area.y;
     let x = area.x;
 
-    // Header row: "SPACES" left-aligned + collapse hint «
+    // Header row: "SPACES" left-aligned + collapse button « (3-char target for easier clicking)
     let collapse_fg = if app.sidebar_toggle_hovered {
         ACCENT
     } else {
         FG_MUTED
     };
-    let spaces_label = format!("{:<width$}", "SPACES", width = w.saturating_sub(1) as usize);
+    let spaces_label = format!("{:<width$}", "SPACES", width = w.saturating_sub(3) as usize);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
                 spaces_label,
                 Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("\u{00AB}", Style::default().fg(collapse_fg)),
+            Span::styled(" \u{00AB} ", Style::default().fg(collapse_fg)),
         ])),
         Rect {
             x,
@@ -58,8 +58,9 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     y += 1;
 
     // Cards — 3 rows each: name, cwd, stats; 1-row gap between cards
+    // Stop early enough to leave the bottom bar row free.
     for (i, space) in app.spaces.iter().enumerate() {
-        if y + 3 > area.y + area.height {
+        if y + 3 >= area.y + area.height {
             break;
         }
 
@@ -154,8 +155,8 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         );
         y += 1;
 
-        // Gap row between cards (not after the last one)
-        if i + 1 < app.spaces.len() && y < area.y + area.height {
+        // Gap row between cards (not after the last one, not into the bottom bar)
+        if i + 1 < app.spaces.len() && y < area.y + area.height - 1 {
             frame.render_widget(
                 Paragraph::new("").style(Style::default().bg(BG_PRIMARY)),
                 Rect {
@@ -169,64 +170,64 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    // [+] New Space button
-    if y < area.y + area.height {
-        let n = app.spaces.len();
-        let (new_space_fg, new_space_bg) = if app.sidebar_hovered == Some(n) {
-            (FG_PRIMARY, ACCENT_HOVER)
-        } else {
-            (FG_MUTED, BG_CARD)
-        };
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                format!("{:<width$}", " [+] New Space", width = w as usize),
-                Style::default().fg(new_space_fg).bg(new_space_bg),
-            )),
-            Rect {
-                x,
-                y,
-                width: w,
-                height: 1,
-            },
-        );
-        y += 1;
-    }
+    // Bottom bar: [+] New (left half) and ≡ Command (right half), always pinned to last row.
+    let bottom_y = area.y + area.height - 1;
+    let half_w = w / 2;
+    let n = app.spaces.len();
 
-    // Command button
-    if y < area.y + area.height {
-        let n = app.spaces.len();
-        let (cmd_fg, cmd_bg) = if app.sidebar_hovered == Some(n + 1) {
-            (FG_PRIMARY, ACCENT_HOVER)
-        } else {
-            (FG_MUTED, BG_CARD)
-        };
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                format!("{:<width$}", " \u{2261}  Command", width = w as usize),
-                Style::default().fg(cmd_fg).bg(cmd_bg),
-            )),
-            Rect {
-                x,
-                y,
-                width: w,
-                height: 1,
-            },
-        );
-    }
+    let (left_fg, left_bg) = if app.sidebar_hovered == Some(n) {
+        (FG_PRIMARY, ACCENT_HOVER)
+    } else {
+        (FG_MUTED, BG_CARD)
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!("{:<width$}", " [+] New", width = half_w as usize),
+            Style::default().fg(left_fg).bg(left_bg),
+        )),
+        Rect {
+            x,
+            y: bottom_y,
+            width: half_w,
+            height: 1,
+        },
+    );
+
+    let (right_fg, right_bg) = if app.sidebar_hovered == Some(n + 1) {
+        (FG_PRIMARY, ACCENT_HOVER)
+    } else {
+        (FG_MUTED, BG_CARD)
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!(
+                "{:<width$}",
+                " \u{2261} Command",
+                width = (w - half_w) as usize
+            ),
+            Style::default().fg(right_fg).bg(right_bg),
+        )),
+        Rect {
+            x: x + half_w,
+            y: bottom_y,
+            width: w - half_w,
+            height: 1,
+        },
+    );
 }
 
 fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {
     let w = area.width; // should be 2
     let x = area.x;
 
-    // Expand hint at top (row 0)
+    // Expand hint at top (row 0) — right-aligned to match the space number labels below
     let expand_fg = if app.sidebar_toggle_hovered {
         ACCENT
     } else {
         FG_MUTED
     };
     frame.render_widget(
-        Paragraph::new(Span::styled("\u{00BB}", Style::default().fg(expand_fg))),
+        Paragraph::new(Span::styled(" \u{00BB}", Style::default().fg(expand_fg))),
         Rect {
             x,
             y: area.y,

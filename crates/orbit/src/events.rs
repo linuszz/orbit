@@ -523,8 +523,8 @@ async fn handle_mouse(
                     app.needs_redraw = true;
                     return;
                 }
-                // Handle « collapse button first
-                if app.sidebar_visible && mouse.column == SIDEBAR_W - 1 {
+                // Handle « collapse button (last 3 cols of header for a larger click target)
+                if app.sidebar_visible && mouse.column >= SIDEBAR_W - 3 {
                     app.sidebar_visible = false;
                     app.needs_redraw = true;
                     return;
@@ -596,21 +596,19 @@ async fn handle_mouse(
                         y += 1;
                     }
                 }
-                // [+] New Space button row
-                if mouse.row == y {
-                    let _ = writer
-                        .send(orbit_protocol::ClientMessage::CreateSpace { name: None })
-                        .await;
-                    app.needs_redraw = true;
-                    return;
-                }
-                // Flight Deck button row
-                if mouse.row == y + 1 {
-                    app.mode = InputMode::CommandPalette {
-                        search: String::new(),
-                        selected: 0,
-                        search_focused: false,
-                    };
+                // Bottom bar: [+] New (left half) | ≡ Command (right half)
+                if mouse.row + 1 == term_h {
+                    if mouse.column < SIDEBAR_W / 2 {
+                        let _ = writer
+                            .send(orbit_protocol::ClientMessage::CreateSpace { name: None })
+                            .await;
+                    } else {
+                        app.mode = InputMode::CommandPalette {
+                            search: String::new(),
+                            selected: 0,
+                            search_focused: false,
+                        };
+                    }
                     app.needs_redraw = true;
                     return;
                 }
@@ -763,9 +761,9 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Moved => {
-            // Sidebar toggle button hover (« collapse or » expand)
+            // Sidebar toggle button hover (« collapse — last 3 cols; » expand — whole 2-col area)
             let toggle_hovered = if app.sidebar_visible {
-                mouse.row == 0 && mouse.column == SIDEBAR_W - 1
+                mouse.row == 0 && mouse.column >= SIDEBAR_W - 3
             } else {
                 mouse.row == 0 && mouse.column < SIDEBAR_COLLAPSED_W
             };
@@ -826,11 +824,11 @@ async fn handle_mouse(
                         y += 1;
                     }
                 }
-                // Check button rows: [+] New Space then ≡ Command
-                if hovered.is_none() {
-                    if mouse.row == y {
+                // Bottom bar hover (last row of terminal)
+                if hovered.is_none() && mouse.row + 1 == term_h {
+                    if mouse.column < SIDEBAR_W / 2 {
                         hovered = Some(app.spaces.len());
-                    } else if mouse.row == y + 1 {
+                    } else {
                         hovered = Some(app.spaces.len() + 1);
                     }
                 }
