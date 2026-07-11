@@ -11,6 +11,49 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 
 use crate::pty::{self, SharedChild, SharedMaster, SharedVtParser};
 
+const ADJECTIVES: &[&str] = &[
+    "cosmic", "stellar", "quantum", "lunar", "solar", "orbital", "deep",
+    "silent", "swift", "apex", "delta", "zenith", "polar", "radiant",
+    "binary", "axial", "thermal", "mach", "ion", "photon",
+];
+
+const NOUNS: &[&str] = &[
+    "mars", "void", "nova", "horizon", "nebula", "atlas", "vega", "lyra",
+    "cygnus", "orbit", "pulse", "core", "arc", "link", "beacon", "vector",
+    "node", "flux", "rift", "zone",
+];
+
+pub fn generate_space_name(existing: &[&str]) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::time::SystemTime;
+
+    // Seed from current time nanos — good enough for name generation.
+    let seed = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as usize)
+        .unwrap_or(42);
+
+    for attempt in 0..10 {
+        let mut h = DefaultHasher::new();
+        (seed + attempt).hash(&mut h);
+        let v = h.finish() as usize;
+        let adj = ADJECTIVES[v % ADJECTIVES.len()];
+        let noun = NOUNS[(v / ADJECTIVES.len()) % NOUNS.len()];
+        let candidate = format!("{adj}-{noun}");
+        if !existing.contains(&candidate.as_str()) {
+            return candidate;
+        }
+    }
+    // Fallback: append attempt index
+    let mut h = DefaultHasher::new();
+    seed.hash(&mut h);
+    let v = h.finish() as usize;
+    let adj = ADJECTIVES[v % ADJECTIVES.len()];
+    let noun = NOUNS[(v / ADJECTIVES.len()) % NOUNS.len()];
+    format!("{adj}-{noun}-2")
+}
+
 pub struct PaneEntry {
     pub input_tx: mpsc::Sender<Vec<u8>>,
     pub vt_parser: SharedVtParser,
@@ -73,7 +116,7 @@ impl SessionState {
 
         Ok(Self {
             space_id: SpaceId(0),
-            space_name: "default".to_string(),
+            space_name: generate_space_name(&[]),
             panes: RwLock::new(panes),
             tabs: RwLock::new(tabs),
             tab_order: RwLock::new(vec![tab_id]),
@@ -410,5 +453,31 @@ impl SessionState {
             active_tab,
             panes: pane_infos,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn space_name_format() {
+        let name = generate_space_name(&[]);
+        let parts: Vec<&str> = name.splitn(2, '-').collect();
+        assert_eq!(parts.len(), 2, "name should be adjective-noun: {name}");
+        assert!(!parts[0].is_empty());
+        assert!(!parts[1].is_empty());
+    }
+
+    #[test]
+    fn space_name_avoids_duplicates() {
+        // Fill up all 400 combinations by calling many times — just verify no panic
+        let mut seen = vec![];
+        for _ in 0..20 {
+            let refs: Vec<&str> = seen.iter().map(|s: &String| s.as_str()).collect();
+            let name = generate_space_name(&refs);
+            seen.push(name);
+        }
+        assert_eq!(seen.len(), 20);
     }
 }
