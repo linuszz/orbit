@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     let areas = tui::compute_leaf_areas(app.pane_tree(), pane_area);
     for (pid, rect) in areas {
         let pc = rect.width;
-        let pr = rect.height.saturating_sub(1);
+        let pr = rect.height.saturating_sub(2);
         if let Some(pane) = app.panes.get_mut(&pid) {
             pane.parser.grid.resize(pc, pr);
         }

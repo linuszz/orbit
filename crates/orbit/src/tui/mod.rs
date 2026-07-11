@@ -11,6 +11,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::Rect,
     style::{Color, Modifier, Style},
+    text::Span,
     widgets::{Block, Borders},
     Frame,
 };
@@ -52,7 +53,6 @@ pub fn term_color(c: &TermColor) -> Color {
 const SIDEBAR_W: u16 = 14;
 const SIDEBAR_COLLAPSED_W: u16 = 2;
 const AGENT_W: u16 = 22;
-const SEP: u16 = 1;
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -209,7 +209,7 @@ pub fn compute_leaf_areas(node: &PaneLayout, area: Rect) -> Vec<(PaneId, Rect)> 
             first,
             second,
         } => {
-            let (first_area, _sep, second_area) = split_area(area, direction);
+            let (first_area, second_area) = split_area(area, direction);
             let mut v = compute_leaf_areas(first, first_area);
             v.extend(compute_leaf_areas(second, second_area));
             v
@@ -227,83 +227,43 @@ fn render_pane_tree(frame: &mut Frame, area: Rect, node: &PaneLayout, app: &App)
             first,
             second,
         } => {
-            let (first_area, sep_area, second_area) = split_area(area, direction);
+            let (first_area, second_area) = split_area(area, direction);
 
             render_pane_tree(frame, first_area, first, app);
-            render_separator(frame, sep_area, *direction);
             render_pane_tree(frame, second_area, second, app);
         }
     }
 }
 
-fn split_area(area: Rect, dir: &SplitDir) -> (Rect, Rect, Rect) {
+fn split_area(area: Rect, dir: &SplitDir) -> (Rect, Rect) {
     match dir {
         SplitDir::Horizontal => {
             let total = area.width;
             let half = total / 2;
-            let first_w = half.saturating_sub(SEP / 2);
-            let second_w = total.saturating_sub(half).saturating_sub(SEP / 2);
             let first = Rect {
-                width: first_w,
-                ..area
-            };
-            let sep = Rect {
-                x: area.x + first_w,
-                width: SEP,
+                width: half,
                 ..area
             };
             let second = Rect {
-                x: area.x + first_w + SEP,
-                width: second_w,
+                x: area.x + half,
+                width: total - half,
                 ..area
             };
-            (first, sep, second)
+            (first, second)
         }
         SplitDir::Vertical => {
             let total = area.height;
             let half = total / 2;
-            let first_h = half.saturating_sub(SEP / 2);
-            let second_h = total.saturating_sub(half).saturating_sub(SEP / 2);
             let first = Rect {
-                height: first_h,
-                ..area
-            };
-            let sep = Rect {
-                y: area.y + first_h,
-                height: SEP,
+                height: half,
                 ..area
             };
             let second = Rect {
-                y: area.y + first_h + SEP,
-                height: second_h,
+                y: area.y + half,
+                height: total - half,
                 ..area
             };
-            (first, sep, second)
-        }
-    }
-}
-
-fn render_separator(frame: &mut Frame, area: Rect, dir: SplitDir) {
-    let style = Style::default().fg(BORDER);
-    let buf = frame.buffer_mut();
-    match dir {
-        SplitDir::Horizontal => {
-            let x = area.x;
-            for y in area.y..area.y + area.height {
-                if let Some(c) = buf.cell_mut((x, y)) {
-                    c.set_char('\u{2502}');
-                    c.set_style(style);
-                }
-            }
-        }
-        SplitDir::Vertical => {
-            let y = area.y;
-            for x in area.x..area.x + area.width {
-                if let Some(c) = buf.cell_mut((x, y)) {
-                    c.set_char('\u{2500}');
-                    c.set_style(style);
-                }
-            }
+            (first, second)
         }
     }
 }
@@ -318,35 +278,25 @@ fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App)
         .map(|i| i + 1)
         .unwrap_or(1);
 
-    let chunks = ratatui::layout::Layout::vertical([
-        ratatui::layout::Constraint::Length(1),
-        ratatui::layout::Constraint::Fill(1),
-    ])
-    .split(area);
-
     let border_color = if is_active { ACCENT } else { BORDER };
-    let title_bg = if is_active { BG_SECONDARY } else { BG_TERTIARY };
-    let title_fg = if is_active { FG_SECONDARY } else { FG_MUTED };
 
-    let title_block = Block::default()
-        .style(Style::default().fg(title_fg).bg(title_bg))
-        .borders(Borders::BOTTOM)
-        .border_style(Style::default().fg(border_color));
-    frame.render_widget(title_block, chunks[0]);
-
-    let label = if is_active {
-        format!("{pane_idx}:~ *")
+    let title = if is_active {
+        format!(" {pane_idx}:~ *")
     } else {
-        format!("{pane_idx}:~")
+        format!(" {pane_idx}:~ ")
     };
-    let title_line = ratatui::text::Line::from(vec![
-        ratatui::text::Span::raw(" "),
-        ratatui::text::Span::styled(
-            label,
-            Style::default().fg(if is_active { ACCENT_IDLE } else { FG_MUTED }),
-        ),
-    ]);
-    frame.render_widget(title_line, chunks[0]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(if is_active { ACCENT_IDLE } else { FG_MUTED })
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
     if let Some(pane) = app.panes.get(&pane_id) {
         let scroll_offset = if is_active {
@@ -360,11 +310,11 @@ fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App)
         };
 
         if let Some(offset) = scroll_offset {
-            render_cells_scrolled(frame, chunks[1], pane, offset);
+            render_cells_scrolled(frame, inner, pane, offset);
         } else {
             render_cells(
                 frame,
-                chunks[1],
+                inner,
                 pane,
                 is_active && app.mode == InputMode::Normal,
             );
