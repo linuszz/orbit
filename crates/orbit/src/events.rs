@@ -441,6 +441,14 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
         tokio::select! {
             biased;
 
+            // Animation tick: 16 ms, only when agents need it (§6.5 redraw-on-demand).
+            _ = tokio::time::sleep(std::time::Duration::from_millis(16)),
+                if app.has_active_agents() =>
+            {
+                app.tick_count = app.tick_count.wrapping_add(1);
+                app.needs_redraw = true;
+            }
+
             event_result = reader.recv() => {
                 match event_result {
                     Ok(event) => app.handle_server_event(&event),

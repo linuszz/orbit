@@ -215,6 +215,8 @@ pub struct App {
     pub agent_scroll_offset: usize,
     pub eclipse_modal: Option<EclipseModalState>,
     pub launch_modal: Option<LaunchModalState>,
+    /// Increments every animation tick (16 ms) while any agent is Working or Blocked.
+    pub tick_count: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +347,7 @@ impl App {
             agent_scroll_offset: 0,
             eclipse_modal: None,
             launch_modal: None,
+            tick_count: 0,
         }
     }
 
@@ -359,6 +362,13 @@ impl App {
         });
         // Card visual positions shift after sorting; stale CardBtn hover is wrong.
         self.agent_hovered = None;
+    }
+
+    /// True when the animation tick timer should be active.
+    pub fn has_active_agents(&self) -> bool {
+        self.agents
+            .iter()
+            .any(|a| matches!(a.status, AgentStatus::Working | AgentStatus::Blocked))
     }
 
     pub fn pane_tree(&self) -> &PaneLayout {

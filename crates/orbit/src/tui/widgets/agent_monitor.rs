@@ -30,6 +30,28 @@ fn status_color(status: &AgentStatus) -> ratatui::style::Color {
     }
 }
 
+/// Animated status color for Working (slow pulse ~2 s) and Blocked (fast pulse ~0.5 s).
+fn animated_status_color(status: &AgentStatus, tick: u64) -> ratatui::style::Color {
+    use ratatui::style::Color;
+    match status {
+        AgentStatus::Working => {
+            if (tick / 62) % 2 == 0 {
+                ACCENT
+            } else {
+                Color::Rgb(120, 60, 0)
+            }
+        }
+        AgentStatus::Blocked => {
+            if (tick / 15) % 2 == 0 {
+                ACCENT_BLOCKED
+            } else {
+                Color::Rgb(100, 85, 0)
+            }
+        }
+        _ => status_color(status),
+    }
+}
+
 fn status_label(status: &AgentStatus) -> &'static str {
     match status {
         AgentStatus::Working => "Working",
@@ -289,7 +311,7 @@ fn render_card(
     card_idx: usize,
     app: &App,
 ) {
-    let sc = status_color(&agent.status);
+    let sc = animated_status_color(&agent.status, app.tick_count);
     let icon = status_icon(&agent.status);
     let label = status_label(&agent.status);
 
@@ -377,22 +399,39 @@ fn render_card(
         );
     }
 
-    // Row 3: progress bar (Working/Blocked with Some(progress)), or blank
+    // Row 3: progress bar (deterministic when Some(progress), indeterminate animation otherwise).
     {
         let show_bar = matches!(agent.status, AgentStatus::Working | AgentStatus::Blocked);
         let progress = agent.detail.as_ref().and_then(|d| d.progress);
         if show_bar {
-            let pct = progress.unwrap_or(0.0).clamp(0.0, 1.0);
-            // " " + bar (w-5) + "xxx%" (4) = w
+            // " " + bar (w-5) + suffix (4) = w
             let bar_w = w.saturating_sub(5) as usize;
-            let filled = (pct * bar_w as f32) as usize;
-            let bar: String = "\u{2588}".repeat(filled) + &"\u{2591}".repeat(bar_w - filled);
-            let pct_text = format!("{:3.0}%", pct * 100.0);
+            let (bar, suffix) = if let Some(pct) = progress {
+                let pct = pct.clamp(0.0, 1.0);
+                let filled = (pct * bar_w as f32) as usize;
+                let b = "\u{2588}".repeat(filled) + &"\u{2591}".repeat(bar_w - filled);
+                (b, format!("{:3.0}%", pct * 100.0))
+            } else {
+                // Indeterminate: 4-cell window scrolling over bar_w cells.
+                let window = 4usize;
+                let cycle = (bar_w + window + 2) as u64;
+                let pos = ((app.tick_count / 5) % cycle) as usize;
+                let b: String = (0..bar_w)
+                    .map(|c| {
+                        if c >= pos && c < pos + window {
+                            "\u{2588}"
+                        } else {
+                            "\u{2591}"
+                        }
+                    })
+                    .collect();
+                (b, "    ".to_string())
+            };
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::raw(" "),
                     Span::styled(bar, Style::default().fg(sc)),
-                    Span::styled(pct_text, Style::default().fg(FG_MUTED)),
+                    Span::styled(suffix, Style::default().fg(FG_MUTED)),
                 ])),
                 Rect {
                     x,
