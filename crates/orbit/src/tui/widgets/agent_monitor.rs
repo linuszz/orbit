@@ -481,10 +481,14 @@ fn render_card(
             (None, true) => String::new(),
         };
 
-        // left = "cwd · model" or just model if no cwd
-        let left_content = match &cwd_short {
-            Some(cwd) if !cwd.is_empty() => format!("{} \u{00B7} {}", cwd, agent.model),
-            _ => agent.model.clone(),
+        // left = "cwd · model" — omit separator when model is empty.
+        let left_content = match (&cwd_short, agent.model.is_empty()) {
+            (Some(cwd), false) if !cwd.is_empty() => {
+                format!("{} \u{00B7} {}", cwd, agent.model)
+            }
+            (Some(cwd), true) if !cwd.is_empty() => cwd.clone(),
+            (_, false) => agent.model.clone(),
+            _ => String::new(),
         };
         let left_max = if right.is_empty() {
             inner_w
