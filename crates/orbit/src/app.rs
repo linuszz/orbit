@@ -1,7 +1,30 @@
 use std::collections::{HashMap, VecDeque};
 
 use orbit_core::VtParser;
-use orbit_protocol::{Cell, CellGrid, FullState, PaneId, PaneLayout, ServerEvent, SplitDir, TabId};
+use orbit_protocol::{
+    Cell, CellGrid, FullState, PaneId, PaneLayout, ServerEvent, SpaceId, SplitDir, TabId,
+};
+
+// Fields consumed by Task 4 (sidebar rendering); suppressing dead_code until then.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct SpaceEntry {
+    pub space_id: SpaceId,
+    pub name: String,
+    pub cwd: String,
+    pub tab_count: usize,
+    pub pane_count: usize,
+}
+
+// Fields consumed by Tasks 4 and 5 (tab bar, mouse selection); suppressing dead_code until then.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct Selection {
+    pub pane_id: PaneId,
+    pub start: (u16, u16), // (col, row) in cell coords within pane
+    pub end: (u16, u16),
+    pub active: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
@@ -150,6 +173,15 @@ pub struct App {
     pub context_menu: Option<ContextMenu>,
     pub space_name: String,
     pub space_path: String,
+    pub spaces: Vec<SpaceEntry>,
+    pub active_space_idx: usize,
+    // Consumed by Task 4 (tab bar hover state)
+    #[allow(dead_code)]
+    pub tab_hovered: Option<usize>,
+    // Consumed by Task 4 (sidebar hover state)
+    #[allow(dead_code)]
+    pub sidebar_hovered: Option<usize>,
+    pub selection: Option<Selection>,
 }
 
 #[derive(Debug, Clone)]
@@ -182,6 +214,24 @@ pub enum ContextMenuItem {
 
 impl App {
     pub fn from_welcome(state: &FullState, cols: u16, rows: u16) -> Self {
+        let spaces: Vec<SpaceEntry> = state
+            .spaces
+            .iter()
+            .map(|s| SpaceEntry {
+                space_id: s.id,
+                name: s.name.clone(),
+                cwd: s.path.clone(),
+                tab_count: s.tabs.len(),
+                pane_count: s.panes.len(),
+            })
+            .collect();
+
+        let active_space_idx = state
+            .spaces
+            .iter()
+            .position(|s| s.id == state.active_space)
+            .unwrap_or(0);
+
         let space = state.spaces.first();
         let mut panes = HashMap::new();
         let mut tabs = Vec::new();
@@ -244,12 +294,19 @@ impl App {
             agent_panel_visible: false,
             show_help: false,
             context_menu: None,
-            space_name: space
+            space_name: spaces
+                .get(active_space_idx)
                 .map(|s| s.name.clone())
-                .unwrap_or_else(|| "default".to_string()),
-            space_path: space
-                .map(|s| s.path.clone())
+                .unwrap_or_else(|| "orbit".to_string()),
+            space_path: spaces
+                .get(active_space_idx)
+                .map(|s| s.cwd.clone())
                 .unwrap_or_else(|| ".".to_string()),
+            spaces,
+            active_space_idx,
+            tab_hovered: None,
+            sidebar_hovered: None,
+            selection: None,
         }
     }
 
@@ -413,9 +470,30 @@ impl App {
                         self.active_tab_id = s.active_tab;
                     }
                 }
+                self.spaces = state
+                    .spaces
+                    .iter()
+                    .map(|s| SpaceEntry {
+                        space_id: s.id,
+                        name: s.name.clone(),
+                        cwd: s.path.clone(),
+                        tab_count: s.tabs.len(),
+                        pane_count: s.panes.len(),
+                    })
+                    .collect();
+                self.active_space_idx = state
+                    .spaces
+                    .iter()
+                    .position(|s| s.id == state.active_space)
+                    .unwrap_or(0);
                 self.needs_redraw = true;
             }
             ServerEvent::PaneOutput { pane_id, data } => {
+                if let Some(sel) = &self.selection {
+                    if sel.pane_id == *pane_id {
+                        self.selection = None;
+                    }
+                }
                 if let Some(pane) = self.panes.get_mut(pane_id) {
                     pane.process(data);
                 }
