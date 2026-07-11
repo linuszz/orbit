@@ -86,11 +86,7 @@ impl SessionState {
         })
     }
 
-    pub async fn split_pane(
-        &self,
-        tab_id: TabId,
-        direction: SplitDir,
-    ) -> anyhow::Result<PaneId> {
+    pub async fn split_pane(&self, tab_id: TabId, direction: SplitDir) -> anyhow::Result<PaneId> {
         let new_id = PaneId(self.next_pane_id.fetch_add(1, Ordering::Relaxed));
         let active = {
             let tabs = self.tabs.read().await;
@@ -176,9 +172,7 @@ impl SessionState {
             tabs.values().map(|t| t.layout.leaves().len()).sum()
         };
         if total_panes == 0 {
-            let _ = self
-                .event_bus
-                .send(ServerEvent::SpaceClosed(self.space_id));
+            let _ = self.event_bus.send(ServerEvent::SpaceClosed(self.space_id));
             return;
         }
 
@@ -236,7 +230,9 @@ impl SessionState {
             let mut order = self.tab_order.write().await;
             order.push(new_id);
         }
-        *self.active_tab.write().await = new_id;
+        {
+            *self.active_tab.write().await = new_id;
+        }
 
         let _ = self
             .event_bus
@@ -265,7 +261,13 @@ impl SessionState {
         {
             let mut active = self.active_tab.write().await;
             if *active == tab_id {
-                *active = self.tab_order.read().await.first().copied().unwrap_or(TabId(0));
+                *active = self
+                    .tab_order
+                    .read()
+                    .await
+                    .first()
+                    .copied()
+                    .unwrap_or(TabId(0));
             }
         }
 
@@ -274,9 +276,7 @@ impl SessionState {
             tabs.values().map(|t| t.layout.leaves().len()).sum()
         };
         if total_panes == 0 {
-            let _ = self
-                .event_bus
-                .send(ServerEvent::SpaceClosed(self.space_id));
+            let _ = self.event_bus.send(ServerEvent::SpaceClosed(self.space_id));
             return;
         }
 
@@ -286,8 +286,10 @@ impl SessionState {
     }
 
     pub async fn switch_tab(&self, tab_id: TabId) {
-        let mut active = self.active_tab.write().await;
-        *active = tab_id;
+        {
+            let mut active = self.active_tab.write().await;
+            *active = tab_id;
+        }
         let _ = self
             .event_bus
             .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
@@ -324,7 +326,9 @@ impl SessionState {
                 tab.active_pane = pane_id;
             }
         }
-        *self.active_tab.write().await = tab_id;
+        {
+            *self.active_tab.write().await = tab_id;
+        }
         let _ = self
             .event_bus
             .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));

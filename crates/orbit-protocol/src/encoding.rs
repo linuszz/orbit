@@ -41,6 +41,31 @@ mod tests {
     }
 
     #[test]
+    fn pane_input_roundtrip() {
+        use crate::{PaneId, TabId};
+        let msg = ClientMessage::PaneInput {
+            tab_id: TabId(1),
+            pane_id: PaneId(1),
+            data: vec![b'a'],
+        };
+        let bytes = encode_message(&msg).unwrap();
+        let payload = &bytes[4..];
+        let (decoded, _): (ClientMessage, usize) = decode_message(payload).unwrap();
+        match decoded {
+            ClientMessage::PaneInput {
+                tab_id,
+                pane_id,
+                data,
+            } => {
+                assert_eq!(tab_id, TabId(1));
+                assert_eq!(pane_id, PaneId(1));
+                assert_eq!(data, vec![b'a']);
+            }
+            other => panic!("expected PaneInput, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn server_event_roundtrip() {
         let msg = ServerEvent::Ping;
         let bytes = encode_message(&msg).unwrap();

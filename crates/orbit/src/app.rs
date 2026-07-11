@@ -435,10 +435,8 @@ impl App {
                             existing.sync_from_server(&pane.cell_grid);
                         }
                     } else {
-                        let ps = PaneState::new(
-                            pane.cell_grid.cols.max(1),
-                            pane.cell_grid.rows.max(1),
-                        );
+                        let ps =
+                            PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
                         self.panes.insert(pane.id, ps);
 
                         if let Some((target, dir)) = self.pending_split.take() {
