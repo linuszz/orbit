@@ -492,6 +492,10 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                         }
                     }
                 }
+                // n: open Launch Satellite picker (new satellite)
+                KeyCode::Char('n') => {
+                    crate::tui::widgets::launch_modal::open(app);
+                }
                 // r: respond to blocked agent (opens Eclipse modal)
                 KeyCode::Char('r') => {
                     let sel = *selected;

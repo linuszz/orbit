@@ -314,7 +314,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             if mid_y + 1 < area.y + area.height {
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(
-                        format!("{:^width$}", "No satellites", width = iw as usize),
+                        format!("{:^width$}", "No satellites running", width = iw as usize),
                         Style::default().fg(FG_MUTED),
                     ))),
                     Rect {
