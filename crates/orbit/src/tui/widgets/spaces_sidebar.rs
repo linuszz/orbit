@@ -58,7 +58,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
 
     // Cards
     for (i, space) in app.spaces.iter().enumerate() {
-        if y + 5 > area.y + area.height {
+        if y + 6 > area.y + area.height {
             break;
         }
 

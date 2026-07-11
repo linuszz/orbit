@@ -46,7 +46,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // Fill remaining space with BG_SECONDARY
     let used_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum::<u16>();
-    let agent_badge_w: u16 = if app.agent_panel_visible { 14 } else { 12 };
+    let agent_badge_w: u16 = " [A] Satellites ".len() as u16;
     let fill_len = inner.width.saturating_sub(used_width + agent_badge_w) as usize;
     spans.push(Span::styled(
         " ".repeat(fill_len),

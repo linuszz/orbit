@@ -447,7 +447,7 @@ async fn handle_mouse(
                 if mouse.column >= tab_x_start {
                     let mut x = tab_x_start;
                     for (i, tab) in app.tabs.iter().enumerate() {
-                        let label_len = tab.name.len() as u16 + 3;
+                        let label_len = tab.name.len() as u16 + 2;
                         if mouse.column >= x && mouse.column < x + label_len {
                             app.active_tab = i;
                             if let Some(&first) = app.pane_tree().leaves().first() {
@@ -468,11 +468,6 @@ async fn handle_mouse(
                         app.needs_redraw = true;
                         return;
                     }
-                }
-                if app.sidebar_visible && mouse.column < sidebar_w && mouse.row == 0 {
-                    app.sidebar_visible = false;
-                    app.needs_redraw = true;
-                    return;
                 }
             }
 

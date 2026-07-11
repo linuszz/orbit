@@ -175,11 +175,7 @@ pub struct App {
     pub space_path: String,
     pub spaces: Vec<SpaceEntry>,
     pub active_space_idx: usize,
-    // Consumed by Task 4 (tab bar hover state)
-    #[allow(dead_code)]
     pub tab_hovered: Option<usize>,
-    // Consumed by Task 4 (sidebar hover state)
-    #[allow(dead_code)]
     pub sidebar_hovered: Option<usize>,
     pub selection: Option<Selection>,
 }
