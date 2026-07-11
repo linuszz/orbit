@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use anyhow::Context;
 use orbit_protocol::{
     CellGrid, FullState, PaneId, PaneInfo, PaneLayout, ServerEvent, SpaceId, SpaceInfo, SplitDir,
     TabId, TabInfo,
@@ -147,17 +148,26 @@ impl SessionState {
             }
         }
 
+        let mut removed_tab = false;
         {
             let mut tabs = self.tabs.write().await;
             if let Some(tab) = tabs.get_mut(&tab_id) {
                 tab.layout.remove_leaf(pane_id);
-                if tab.layout.leaves().is_empty() {
-                    if let Some(first) = tab.layout.leaves().first().copied() {
-                        tab.active_pane = first;
-                    }
-                } else {
-                    tab.active_pane = tab.layout.leaves()[0];
+                let leaves = tab.layout.leaves();
+                tab.active_pane = leaves.first().copied().unwrap_or(tab.active_pane);
+                if leaves.is_empty() {
+                    tabs.remove(&tab_id);
+                    removed_tab = true;
                 }
+            }
+        }
+
+        if removed_tab {
+            let mut order = self.tab_order.write().await;
+            order.retain(|&id| id != tab_id);
+            let mut active = self.active_tab.write().await;
+            if *active == tab_id {
+                *active = order.first().copied().unwrap_or(TabId(0));
             }
         }
 
@@ -177,7 +187,7 @@ impl SessionState {
             .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 
-    pub async fn new_tab(&self, name: Option<String>) -> TabId {
+    pub async fn new_tab(&self, name: Option<String>) -> anyhow::Result<TabId> {
         let new_id = TabId(self.next_tab_id.fetch_add(1, Ordering::Relaxed));
         let name = name.unwrap_or_else(|| format!("tab{}", new_id.0));
         let pane_id = PaneId(self.next_pane_id.fetch_add(1, Ordering::Relaxed));
@@ -196,7 +206,7 @@ impl SessionState {
             self.event_bus.clone(),
         )
         .await
-        .expect("failed to spawn PTY for new tab");
+        .context("failed to spawn PTY for new tab")?;
 
         {
             let mut panes = self.panes.write().await;
@@ -231,7 +241,7 @@ impl SessionState {
         let _ = self
             .event_bus
             .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
-        new_id
+        Ok(new_id)
     }
 
     pub async fn close_tab(&self, tab_id: TabId) {
@@ -308,11 +318,16 @@ impl SessionState {
     }
 
     pub async fn focus_pane(&self, tab_id: TabId, pane_id: PaneId) {
-        let mut tabs = self.tabs.write().await;
-        if let Some(tab) = tabs.get_mut(&tab_id) {
-            tab.active_pane = pane_id;
+        {
+            let mut tabs = self.tabs.write().await;
+            if let Some(tab) = tabs.get_mut(&tab_id) {
+                tab.active_pane = pane_id;
+            }
         }
         *self.active_tab.write().await = tab_id;
+        let _ = self
+            .event_bus
+            .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 
     pub async fn collect_full_state(&self) -> FullState {

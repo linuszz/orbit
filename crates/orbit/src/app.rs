@@ -411,11 +411,6 @@ impl App {
                         self.tabs = new_tabs;
                         self.active_tab = if found_active { new_active_idx } else { 0 };
                         self.active_tab_id = s.active_tab;
-                        if let Some(active_tab) = self.tabs.get(self.active_tab) {
-                            if let Some(&first_leaf) = active_tab.pane_tree.leaves().first() {
-                                self.active_pane = first_leaf;
-                            }
-                        }
                     }
                 }
                 self.needs_redraw = true;
@@ -480,9 +475,15 @@ impl App {
                     self.active_tab = if found_active { new_active_idx } else { 0 };
                     self.active_tab_id = info.active_tab;
                     if let Some(active_tab) = self.tabs.get(self.active_tab) {
-                        if let Some(&first_leaf) = active_tab.pane_tree.leaves().first() {
-                            self.active_pane = first_leaf;
-                        }
+                        let server_active = info
+                            .tabs
+                            .iter()
+                            .find(|t| t.id == info.active_tab)
+                            .map(|t| t.active_pane);
+                        self.active_pane = server_active
+                            .filter(|&pid| self.panes.contains_key(&pid))
+                            .or_else(|| active_tab.pane_tree.leaves().first().copied())
+                            .unwrap_or(self.active_pane);
                     }
                 }
 

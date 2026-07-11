@@ -73,7 +73,11 @@ pub async fn handle_client(mut stream: Stream, session: Arc<SessionState>) -> Re
                     }
                     ClientMessage::ResizePane { tab_id, pane_id, cols, rows } => session.resize_pane(tab_id, pane_id, cols, rows).await,
                     ClientMessage::FocusPane { tab_id, pane_id } => session.focus_pane(tab_id, pane_id).await,
-                    ClientMessage::NewTab { name } => { session.new_tab(name).await; }
+                    ClientMessage::NewTab { name } => {
+                        if let Err(e) = session.new_tab(name).await {
+                            tracing::warn!("new_tab: {e:#}");
+                        }
+                    }
                     ClientMessage::CloseTab { tab_id } => session.close_tab(tab_id).await,
                     ClientMessage::SwitchTab { tab_id } => session.switch_tab(tab_id).await,
                     ClientMessage::RequestFullState => {
