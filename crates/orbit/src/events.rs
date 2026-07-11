@@ -527,8 +527,12 @@ async fn handle_eclipse_modal_mouse(
         return;
     }
 
-    // Button row: modal_y + modal_h - 3  (blank before it, border after it).
-    let btn_row = modal_y + modal_h.saturating_sub(3);
+    // Buttons render at modal_y+13 when modal_h>=14, or modal_y+12 when modal_h==13.
+    // When modal_h<13 the buttons are outside the modal boundary and not rendered.
+    if modal_h < 13 {
+        return;
+    }
+    let btn_row = modal_y + modal_h.min(14) - 1;
     if mouse.row != btn_row {
         return;
     }
@@ -788,7 +792,11 @@ async fn handle_mouse(
                 let mut card_row_start = base_row;
                 let scroll = app.agent_scroll_offset;
                 // Collect (id, pane_id, status) so we can drop the borrow before mutations.
-                let visible: Vec<(orbit_protocol::AgentId, Option<orbit_protocol::PaneId>, orbit_protocol::AgentStatus)> = app
+                let visible: Vec<(
+                    orbit_protocol::AgentId,
+                    Option<orbit_protocol::PaneId>,
+                    orbit_protocol::AgentStatus,
+                )> = app
                     .agents
                     .iter()
                     .skip(scroll)
@@ -812,12 +820,12 @@ async fn handle_mouse(
                                 // Slot 0: [View] — focus agent's pane, switching tabs if needed
                                 (0, _) => {
                                     if let Some(pane_id) = agent_pane {
-                                        let found = app.tabs.iter().enumerate().find(|(_, t)| {
-                                            t.pane_tree.leaves().contains(&pane_id)
-                                        });
-                                        let tab_id = found
-                                            .map(|(_, t)| t.id)
-                                            .unwrap_or(app.active_tab_id);
+                                        let found =
+                                            app.tabs.iter().enumerate().find(|(_, t)| {
+                                                t.pane_tree.leaves().contains(&pane_id)
+                                            });
+                                        let tab_id =
+                                            found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
                                         let tab_idx =
                                             found.map(|(i, _)| i).unwrap_or(app.active_tab);
                                         app.active_pane = pane_id;
@@ -837,12 +845,12 @@ async fn handle_mouse(
                                 // Slot 2: [Chat] (Working) — focus pane to interact
                                 (2, orbit_protocol::AgentStatus::Working) => {
                                     if let Some(pane_id) = agent_pane {
-                                        let found = app.tabs.iter().enumerate().find(|(_, t)| {
-                                            t.pane_tree.leaves().contains(&pane_id)
-                                        });
-                                        let tab_id = found
-                                            .map(|(_, t)| t.id)
-                                            .unwrap_or(app.active_tab_id);
+                                        let found =
+                                            app.tabs.iter().enumerate().find(|(_, t)| {
+                                                t.pane_tree.leaves().contains(&pane_id)
+                                            });
+                                        let tab_id =
+                                            found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
                                         let tab_idx =
                                             found.map(|(i, _)| i).unwrap_or(app.active_tab);
                                         app.active_pane = pane_id;
@@ -867,12 +875,12 @@ async fn handle_mouse(
                                 (1, orbit_protocol::AgentStatus::Idle)
                                 | (1, orbit_protocol::AgentStatus::Done) => {
                                     if let Some(pane_id) = agent_pane {
-                                        let found = app.tabs.iter().enumerate().find(|(_, t)| {
-                                            t.pane_tree.leaves().contains(&pane_id)
-                                        });
-                                        let tab_id = found
-                                            .map(|(_, t)| t.id)
-                                            .unwrap_or(app.active_tab_id);
+                                        let found =
+                                            app.tabs.iter().enumerate().find(|(_, t)| {
+                                                t.pane_tree.leaves().contains(&pane_id)
+                                            });
+                                        let tab_id =
+                                            found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
                                         let tab_idx =
                                             found.map(|(i, _)| i).unwrap_or(app.active_tab);
                                         app.active_pane = pane_id;
@@ -887,19 +895,18 @@ async fn handle_mouse(
                                 // Slot 2: [Rmov] (Idle / Done) — dismiss from list
                                 (2, orbit_protocol::AgentStatus::Idle)
                                 | (2, orbit_protocol::AgentStatus::Done) => {
-                                    let _ = writer
-                                        .send(ClientMessage::AgentRemove { agent_id })
-                                        .await;
+                                    let _ =
+                                        writer.send(ClientMessage::AgentRemove { agent_id }).await;
                                 }
                                 // Slot 1: [Rstr] (Error) — focus pane to inspect
                                 (1, orbit_protocol::AgentStatus::Error) => {
                                     if let Some(pane_id) = agent_pane {
-                                        let found = app.tabs.iter().enumerate().find(|(_, t)| {
-                                            t.pane_tree.leaves().contains(&pane_id)
-                                        });
-                                        let tab_id = found
-                                            .map(|(_, t)| t.id)
-                                            .unwrap_or(app.active_tab_id);
+                                        let found =
+                                            app.tabs.iter().enumerate().find(|(_, t)| {
+                                                t.pane_tree.leaves().contains(&pane_id)
+                                            });
+                                        let tab_id =
+                                            found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
                                         let tab_idx =
                                             found.map(|(i, _)| i).unwrap_or(app.active_tab);
                                         app.active_pane = pane_id;
@@ -913,9 +920,8 @@ async fn handle_mouse(
                                 }
                                 // Slot 2: [Rmov] (Error) — dismiss from list
                                 (2, orbit_protocol::AgentStatus::Error) => {
-                                    let _ = writer
-                                        .send(ClientMessage::AgentRemove { agent_id })
-                                        .await;
+                                    let _ =
+                                        writer.send(ClientMessage::AgentRemove { agent_id }).await;
                                 }
                                 _ => {}
                             }
@@ -931,10 +937,8 @@ async fn handle_mouse(
                                 .iter()
                                 .enumerate()
                                 .find(|(_, t)| t.pane_tree.leaves().contains(&pane_id));
-                            let tab_id =
-                                found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
-                            let tab_idx =
-                                found.map(|(i, _)| i).unwrap_or(app.active_tab);
+                            let tab_id = found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
+                            let tab_idx = found.map(|(i, _)| i).unwrap_or(app.active_tab);
                             app.active_pane = pane_id;
                             app.active_tab = tab_idx;
                             app.active_tab_id = tab_id;
@@ -1083,9 +1087,7 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollUp => {
-            if app.agent_panel_visible
-                && mouse.column >= term_w.saturating_sub(AGENT_W)
-            {
+            if app.agent_panel_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
                 app.agent_scroll_offset = app.agent_scroll_offset.saturating_sub(1);
                 app.needs_redraw = true;
             } else if let InputMode::Scroll { offset } = &mut app.mode {
@@ -1094,9 +1096,7 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollDown => {
-            if app.agent_panel_visible
-                && mouse.column >= term_w.saturating_sub(AGENT_W)
-            {
+            if app.agent_panel_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
                 let max_scroll = app.agents.len().saturating_sub(1);
                 app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max_scroll);
                 app.needs_redraw = true;
@@ -1185,7 +1185,8 @@ async fn handle_mouse(
                         crate::tui::widgets::agent_monitor::card_start_row(0, any_blocked, 0);
                     let mut card_row_start = base_row;
                     let mut found = None;
-                    for (card_idx, _) in app.agents.iter().skip(app.agent_scroll_offset).enumerate() {
+                    for (card_idx, _) in app.agents.iter().skip(app.agent_scroll_offset).enumerate()
+                    {
                         if mouse.row >= card_row_start && mouse.row < card_row_start + 5 {
                             let card_row = mouse.row - card_row_start;
                             if card_row == 4 {

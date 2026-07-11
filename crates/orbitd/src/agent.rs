@@ -8,7 +8,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use orbit_protocol::{AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
+use orbit_protocol::{AgentDetail, AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
 use tokio::sync::{broadcast, RwLock};
 use tracing::debug;
 
@@ -104,6 +104,7 @@ impl AgentRegistry {
                     if let Some(name) = agent_name_for(*cpid) {
                         let id = AgentId(self.next_id.fetch_add(1, Ordering::Relaxed));
                         let model = extract_model(*cpid).unwrap_or_default();
+                        let task = extract_task(*cpid);
                         let info = AgentInfo {
                             id,
                             name,
@@ -111,7 +112,10 @@ impl AgentRegistry {
                             pane_id: Some(pane_id),
                             model,
                             status: AgentStatus::Working,
-                            detail: None,
+                            detail: Some(AgentDetail {
+                                task,
+                                ..Default::default()
+                            }),
                         };
                         tracked.insert(*cpid, (id, Instant::now()));
                         self.agents.write().await.push(info.clone());
@@ -250,6 +254,29 @@ fn extract_model(pid: u32) -> Option<String> {
         }
     }
     None
+}
+
+/// Extract a short task description from positional (non-flag) cmdline args.
+fn extract_task(pid: u32) -> Option<String> {
+    let cmdline = read_cmdline(pid)?;
+    let args: Vec<&str> = cmdline.split('\0').filter(|s| !s.is_empty()).collect();
+    let positional: Vec<&str> = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with('-'))
+        .copied()
+        .collect();
+    if positional.is_empty() {
+        return None;
+    }
+    Some(
+        positional
+            .iter()
+            .take(2)
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 #[cfg(target_os = "linux")]

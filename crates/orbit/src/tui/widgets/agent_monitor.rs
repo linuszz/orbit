@@ -245,11 +245,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             if y + 5 > area.y + area.height {
                 // Show "▼ N more" indicator when cards are truncated.
                 let remaining = total - app.agent_scroll_offset - card_idx;
-                if remaining > 0 && y <= area.y + area.height {
+                if remaining > 0 && y < area.y + area.height {
                     let more_text = format!(" \u{25BE} {} more", remaining);
                     frame.render_widget(
                         Paragraph::new(Span::styled(more_text, Style::default().fg(FG_MUTED))),
-                        Rect { x: ix, y: area.y + area.height - 1, width: iw, height: 1 },
+                        Rect {
+                            x: ix,
+                            y: area.y + area.height - 1,
+                            width: iw,
+                            height: 1,
+                        },
                     );
                 }
                 break;

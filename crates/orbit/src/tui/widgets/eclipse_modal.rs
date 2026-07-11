@@ -44,7 +44,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     );
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(ACCENT_BLOCKED).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(ACCENT_BLOCKED)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ACCENT_BLOCKED))
         .style(Style::default().bg(BG_SECONDARY));
@@ -65,7 +69,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::BOLD),
             ),
         ])),
-        Rect { x: inner_x, y: row, width: inner_w, height: 1 },
+        Rect {
+            x: inner_x,
+            y: row,
+            width: inner_w,
+            height: 1,
+        },
     );
     row += 1;
 
@@ -76,7 +85,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             truncate_str(&subtitle, inner_w as usize),
             Style::default().fg(FG_SECONDARY),
         )),
-        Rect { x: inner_x, y: row, width: inner_w, height: 1 },
+        Rect {
+            x: inner_x,
+            y: row,
+            width: inner_w,
+            height: 1,
+        },
     );
     row += 1;
 
@@ -85,8 +99,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // "Last message:" label
     frame.render_widget(
-        Paragraph::new(Span::styled(" Last message:", Style::default().fg(FG_MUTED))),
-        Rect { x: inner_x, y: row, width: inner_w, height: 1 },
+        Paragraph::new(Span::styled(
+            " Last message:",
+            Style::default().fg(FG_MUTED),
+        )),
+        Rect {
+            x: inner_x,
+            y: row,
+            width: inner_w,
+            height: 1,
+        },
     );
     row += 1;
 
@@ -94,65 +116,77 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block_w = inner_w.saturating_sub(2);
     let msg_inner_x = inner_x + 1;
     {
-        let border_top = format!(
-            "\u{250c}{}\u{2510}",
-            "\u{2500}".repeat(block_w as usize)
-        );
+        let border_top = format!("\u{250c}{}\u{2510}", "\u{2500}".repeat(block_w as usize));
         frame.render_widget(
             Paragraph::new(Span::styled(border_top, Style::default().fg(BORDER))),
-            Rect { x: msg_inner_x, y: row, width: block_w + 2, height: 1 },
+            Rect {
+                x: msg_inner_x,
+                y: row,
+                width: block_w + 2,
+                height: 1,
+            },
         );
         row += 1;
-        let msg_display = format!(
-            "\u{2502}{:<width$}\u{2502}",
-            truncate_str(&modal.block_msg, block_w as usize),
-            width = block_w as usize
-        );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
+                Span::styled("\u{2502}", Style::default().fg(BORDER)),
                 Span::styled(
-                    &msg_display[..1],
-                    Style::default().fg(BORDER),
-                ),
-                Span::styled(
-                    msg_display[1..msg_display.len()-1].to_string(),
+                    format!(
+                        "{:<width$}",
+                        truncate_str(&modal.block_msg, block_w as usize),
+                        width = block_w as usize
+                    ),
                     Style::default().fg(FG_SECONDARY),
                 ),
-                Span::styled(
-                    &msg_display[msg_display.len()-1..],
-                    Style::default().fg(BORDER),
-                ),
+                Span::styled("\u{2502}", Style::default().fg(BORDER)),
             ])),
-            Rect { x: msg_inner_x, y: row, width: block_w + 2, height: 1 },
+            Rect {
+                x: msg_inner_x,
+                y: row,
+                width: block_w + 2,
+                height: 1,
+            },
         );
         row += 1;
-        let border_bot = format!(
-            "\u{2514}{}\u{2518}",
-            "\u{2500}".repeat(block_w as usize)
-        );
+        let border_bot = format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(block_w as usize));
         frame.render_widget(
             Paragraph::new(Span::styled(border_bot, Style::default().fg(BORDER))),
-            Rect { x: msg_inner_x, y: row, width: block_w + 2, height: 1 },
+            Rect {
+                x: msg_inner_x,
+                y: row,
+                width: block_w + 2,
+                height: 1,
+            },
         );
         row += 1;
     }
 
     // "Your response:" label
     frame.render_widget(
-        Paragraph::new(Span::styled(" Your response:", Style::default().fg(FG_MUTED))),
-        Rect { x: inner_x, y: row, width: inner_w, height: 1 },
+        Paragraph::new(Span::styled(
+            " Your response:",
+            Style::default().fg(FG_MUTED),
+        )),
+        Rect {
+            x: inner_x,
+            y: row,
+            width: inner_w,
+            height: 1,
+        },
     );
     row += 1;
 
     // Response input box.
     {
-        let border_top = format!(
-            "\u{250c}{}\u{2510}",
-            "\u{2500}".repeat(block_w as usize)
-        );
+        let border_top = format!("\u{250c}{}\u{2510}", "\u{2500}".repeat(block_w as usize));
         frame.render_widget(
             Paragraph::new(Span::styled(border_top, Style::default().fg(ACCENT))),
-            Rect { x: msg_inner_x, y: row, width: block_w + 2, height: 1 },
+            Rect {
+                x: msg_inner_x,
+                y: row,
+                width: block_w + 2,
+                height: 1,
+            },
         );
         row += 1;
         let cursor = "\u{2588}"; // block cursor
@@ -165,16 +199,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled(input_padded, Style::default().fg(FG_PRIMARY)),
                 Span::styled("\u{2502}", Style::default().fg(ACCENT)),
             ])),
-            Rect { x: msg_inner_x, y: row, width: block_w + 2, height: 1 },
+            Rect {
+                x: msg_inner_x,
+                y: row,
+                width: block_w + 2,
+                height: 1,
+            },
         );
         row += 1;
-        let border_bot = format!(
-            "\u{2514}{}\u{2518}",
-            "\u{2500}".repeat(block_w as usize)
-        );
+        let border_bot = format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(block_w as usize));
         frame.render_widget(
             Paragraph::new(Span::styled(border_bot, Style::default().fg(ACCENT))),
-            Rect { x: msg_inner_x, y: row, width: block_w + 2, height: 1 },
+            Rect {
+                x: msg_inner_x,
+                y: row,
+                width: block_w + 2,
+                height: 1,
+            },
         );
         row += 1;
     }
@@ -194,12 +235,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled("[Cancel]", Style::default().fg(FG_MUTED)),
                 Span::raw("  "),
                 Span::styled("[Abort Eclipse]", Style::default().fg(ACCENT_ERROR)),
-                Span::styled(
-                    "   Enter:send  Esc:cancel",
-                    Style::default().fg(FG_MUTED),
-                ),
+                Span::styled("   Enter:send  Esc:cancel", Style::default().fg(FG_MUTED)),
             ])),
-            Rect { x: inner_x, y: row, width: inner_w, height: 1 },
+            Rect {
+                x: inner_x,
+                y: row,
+                width: inner_w,
+                height: 1,
+            },
         );
     }
 }
