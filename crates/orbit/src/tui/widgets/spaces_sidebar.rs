@@ -1,3 +1,4 @@
+use orbit_protocol::AgentStatus;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -129,14 +130,38 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         );
         y += 1;
 
-        // Stats row
+        // Stats row — tab/pane counts + agent fleet summary for this space.
         let status_sym = if space.pane_count > 0 {
             "\u{25CF}"
         } else {
             "\u{25CB}"
         };
-        let stats_raw = format!(" {} {}t {}p", status_sym, space.tab_count, space.pane_count);
-        let stats_text = format!("{:<width$}", stats_raw, width = w as usize);
+        // Count agents belonging to this space.
+        let space_agents: Vec<_> = app
+            .agents
+            .iter()
+            .filter(|a| a.space_id == space.space_id)
+            .collect();
+        let agent_badge = if !space_agents.is_empty() {
+            let n_blocked = space_agents
+                .iter()
+                .filter(|a| a.status == AgentStatus::Blocked)
+                .count();
+            let n_working = space_agents
+                .iter()
+                .filter(|a| a.status == AgentStatus::Working)
+                .count();
+            if n_blocked > 0 {
+                format!(" \u{25CE}{}", n_blocked)
+            } else if n_working > 0 {
+                format!(" \u{25CF}{}", n_working)
+            } else {
+                format!(" \u{25CB}{}", space_agents.len())
+            }
+        } else {
+            String::new()
+        };
+        let base_stats = format!(" {} {}t {}p", status_sym, space.tab_count, space.pane_count);
         let (stats_bg, stats_fg) = if is_active {
             (ACCENT, BG_PRIMARY)
         } else if is_hovered {
@@ -144,11 +169,37 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             (BG_SECONDARY, FG_MUTED)
         };
+        // Color the agent badge by urgency (only on non-active rows so it's visible).
+        let badge_color = if is_active || is_hovered {
+            stats_fg
+        } else if !space_agents.is_empty() {
+            let n_blocked = space_agents
+                .iter()
+                .filter(|a| a.status == AgentStatus::Blocked)
+                .count();
+            let n_working = space_agents
+                .iter()
+                .filter(|a| a.status == AgentStatus::Working)
+                .count();
+            if n_blocked > 0 {
+                ACCENT_BLOCKED
+            } else if n_working > 0 {
+                ACCENT
+            } else {
+                FG_MUTED
+            }
+        } else {
+            stats_fg
+        };
+        let total_len = base_stats.len() + agent_badge.len();
+        let pad = (w as usize).saturating_sub(total_len);
+        let pad_str = " ".repeat(pad);
         frame.render_widget(
-            Paragraph::new(Span::styled(
-                stats_text,
-                Style::default().fg(stats_fg).bg(stats_bg),
-            )),
+            Paragraph::new(Line::from(vec![
+                Span::styled(base_stats, Style::default().fg(stats_fg).bg(stats_bg)),
+                Span::styled(agent_badge, Style::default().fg(badge_color).bg(stats_bg)),
+                Span::styled(pad_str, Style::default().bg(stats_bg)),
+            ])),
             Rect {
                 x,
                 y,
