@@ -391,17 +391,23 @@ fn render_card(
         false
     };
     let card_bg = if is_selected { BG_CARD } else { BG_SECONDARY };
+    // Orange accent marker rendered instead of the leading space on selected cards.
+    let sel_mark = if is_selected {
+        Span::styled("\u{25B8}", Style::default().fg(ACCENT).bg(card_bg)) // ▸
+    } else {
+        Span::styled(" ", Style::default().bg(card_bg))
+    };
 
-    // Row 0: icon + " " + name (11 cols) + " " + status (7 cols) = 21
+    // Row 0: icon + sel_mark + name (11 cols) + " " + status (7 cols) = 21
     {
-        let name_w = (w.saturating_sub(2 + 1 + 7)) as usize; // icon+sp + sp + status
+        let name_w = (w.saturating_sub(2 + 1 + 7)) as usize; // icon+mark + sp + status
         let name = truncate_str(&agent.name, name_w);
         let name_padded = format!("{:<width$}", name, width = name_w);
         let status_padded = format!("{:>7}", label);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(icon, Style::default().fg(sc).bg(card_bg)),
-                Span::styled(" ", Style::default().bg(card_bg)),
+                sel_mark.clone(),
                 Span::styled(
                     name_padded,
                     Style::default()
@@ -469,17 +475,17 @@ fn render_card(
             inner_w.saturating_sub(right.len() + 1)
         };
         let left = truncate_str(&left_content, left_max);
-        let model_text = if right.is_empty() {
-            format!(" {:<width$}", left, width = inner_w)
+        let model_body = if right.is_empty() {
+            format!("{:<width$}", left, width = inner_w)
         } else {
             let pad = inner_w.saturating_sub(left.len() + right.len());
-            format!(" {}{}{}", left, " ".repeat(pad), right)
+            format!("{}{}{}", left, " ".repeat(pad), right)
         };
         frame.render_widget(
-            Paragraph::new(Line::from(vec![Span::styled(
-                model_text,
-                Style::default().fg(FG_MUTED).bg(card_bg),
-            )])),
+            Paragraph::new(Line::from(vec![
+                sel_mark.clone(),
+                Span::styled(model_body, Style::default().fg(FG_MUTED).bg(card_bg)),
+            ])),
             Rect {
                 x,
                 y: y + 1,
@@ -511,12 +517,12 @@ fn render_card(
                 .unwrap_or(""),
         };
         let task = truncate_str(task_str, w.saturating_sub(1) as usize);
-        let task_text = format!(" {:<width$}", task, width = w.saturating_sub(1) as usize);
+        let task_body = format!("{:<width$}", task, width = w.saturating_sub(1) as usize);
         frame.render_widget(
-            Paragraph::new(Span::styled(
-                task_text,
-                Style::default().fg(FG_SECONDARY).bg(card_bg),
-            )),
+            Paragraph::new(Line::from(vec![
+                sel_mark.clone(),
+                Span::styled(task_body, Style::default().fg(FG_SECONDARY).bg(card_bg)),
+            ])),
             Rect {
                 x,
                 y: y + 2,
@@ -561,7 +567,7 @@ fn render_card(
             };
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
-                    Span::styled(" ", Style::default().bg(card_bg)),
+                    sel_mark.clone(),
                     Span::styled(bar, Style::default().fg(sc).bg(card_bg)),
                     Span::styled(suffix, Style::default().fg(FG_MUTED).bg(card_bg)),
                 ])),
@@ -574,7 +580,13 @@ fn render_card(
             );
         } else {
             frame.render_widget(
-                Paragraph::new("").style(Style::default().bg(card_bg)),
+                Paragraph::new(Line::from(vec![
+                    sel_mark.clone(),
+                    Span::styled(
+                        " ".repeat(w.saturating_sub(1) as usize),
+                        Style::default().bg(card_bg),
+                    ),
+                ])),
                 Rect {
                     x,
                     y: y + 3,
@@ -585,10 +597,10 @@ fn render_card(
         }
     }
 
-    // Row 4: " " + [Btn1] + " " + [Btn2] + " " + [Btn3] = 1+6+1+6+1+6 = 21
+    // Row 4: sel_mark + [Btn1] + " " + [Btn2] + " " + [Btn3] = 1+6+1+6+1+6 = 21
     {
         let buttons = card_buttons(&agent.status);
-        let mut spans = vec![Span::styled(" ", Style::default().bg(card_bg))];
+        let mut spans = vec![sel_mark];
         for (slot, (btn_label, is_danger)) in buttons.iter().enumerate() {
             if slot > 0 {
                 spans.push(Span::styled(" ", Style::default().bg(card_bg)));
