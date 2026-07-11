@@ -25,6 +25,8 @@ pub struct CellGrid {
     saved_cells: Option<Vec<Cell>>,
     saved_cursor_x: u16,
     saved_cursor_y: u16,
+    saved_scroll_top: u16,
+    saved_scroll_bottom: u16,
     pub in_alternate_screen: bool,
 }
 
@@ -52,6 +54,8 @@ impl CellGrid {
             saved_cells: None,
             saved_cursor_x: 0,
             saved_cursor_y: 0,
+            saved_scroll_top: 0,
+            saved_scroll_bottom: rows.saturating_sub(1),
             in_alternate_screen: false,
         }
     }
@@ -311,10 +315,15 @@ impl CellGrid {
         self.saved_cells = Some(self.cells.clone());
         self.saved_cursor_x = self.cursor_x;
         self.saved_cursor_y = self.cursor_y;
+        // Save and reset scroll region so apps entering alt screen get a clean region
+        self.saved_scroll_top = self.scroll_top;
+        self.saved_scroll_bottom = self.scroll_bottom;
         let size = self.cols as usize * self.rows as usize;
         self.cells = vec![Cell::default(); size];
         self.cursor_x = 0;
         self.cursor_y = 0;
+        self.scroll_top = 0;
+        self.scroll_bottom = self.rows.saturating_sub(1);
         self.in_alternate_screen = true;
     }
 
@@ -327,6 +336,8 @@ impl CellGrid {
             self.cursor_x = self.saved_cursor_x;
             self.cursor_y = self.saved_cursor_y;
         }
+        self.scroll_top = self.saved_scroll_top;
+        self.scroll_bottom = self.saved_scroll_bottom;
         self.in_alternate_screen = false;
     }
 

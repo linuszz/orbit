@@ -390,7 +390,7 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                         handle_key(key, app, &writer).await;
                     }
                     Some(Ok(Event::Resize(cols, rows))) => {
-                        let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
+                        let sidebar_w: u16 = if app.sidebar_visible { SIDEBAR_W } else { SIDEBAR_COLLAPSED_W };
                         let total_cols = cols.saturating_sub(sidebar_w).max(20);
                         let total_rows = rows.saturating_sub(3).max(5);
                         let pane_area = ratatui::layout::Rect {
@@ -489,7 +489,11 @@ async fn handle_mouse(
         return;
     }
 
-    let sidebar_w: u16 = if app.sidebar_visible { 14 } else { 2 };
+    let sidebar_w: u16 = if app.sidebar_visible {
+        SIDEBAR_W
+    } else {
+        SIDEBAR_COLLAPSED_W
+    };
     let agent_w: u16 = if app.agent_panel_visible { 22 } else { 0 };
     let term_w = term_size.width;
     let term_h = term_size.height;
@@ -497,10 +501,16 @@ async fn handle_mouse(
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             if mouse.row == 0 {
+                // Handle « collapse button first
+                if app.sidebar_visible && mouse.column == SIDEBAR_W - 1 {
+                    app.sidebar_visible = false;
+                    app.needs_redraw = true;
+                    return;
+                }
                 if app.sidebar_visible && mouse.column < sidebar_w {
                     return;
                 }
-                let tab_x_start = sidebar_w + 1;
+                let tab_x_start = sidebar_w;
                 if mouse.column >= tab_x_start {
                     let mut x = tab_x_start;
                     for (i, tab) in app.tabs.iter().enumerate() {
@@ -529,12 +539,6 @@ async fn handle_mouse(
                 }
             }
 
-            // Sidebar: collapse button («) at (sidebar_w-1, 0)
-            if mouse.column == SIDEBAR_W - 1 && mouse.row == 0 && app.sidebar_visible {
-                app.sidebar_visible = false;
-                app.needs_redraw = true;
-                return;
-            }
             // Sidebar: expand button (») when collapsed
             if !app.sidebar_visible && mouse.column < SIDEBAR_COLLAPSED_W && mouse.row > 0 {
                 app.sidebar_visible = true;
@@ -543,16 +547,27 @@ async fn handle_mouse(
             }
             // Sidebar: click a space card
             if app.sidebar_visible && mouse.column < SIDEBAR_W {
-                // Cards start at row 2 (after header + divider). Each card is 4 content rows + 1 gap = 5 rows.
-                let content_row = mouse.row.saturating_sub(2);
-                let card_idx = (content_row / 5) as usize;
-                if card_idx < app.spaces.len() {
-                    let space_id = app.spaces[card_idx].space_id;
-                    app.active_space_idx = card_idx;
-                    let _ = writer
-                        .send(orbit_protocol::ClientMessage::SwitchSpace { space_id })
-                        .await;
-                    app.needs_redraw = true;
+                let mut y: u16 = 2; // after header + divider
+                for (i, space) in app.spaces.iter().enumerate() {
+                    // card occupies 4 rows: top_border, cwd, stats, bottom_border
+                    if mouse.row >= y && mouse.row < y + 4 {
+                        let space_id = space.space_id;
+                        app.active_space_idx = i;
+                        let _ = writer
+                            .send(orbit_protocol::ClientMessage::SwitchSpace { space_id })
+                            .await;
+                        app.needs_redraw = true;
+                        return;
+                    }
+                    y += 4;
+                    // gap row between cards (not after last)
+                    if i + 1 < app.spaces.len() {
+                        y += 1;
+                    }
+                }
+                // [+] New button row
+                if mouse.row == y {
+                    app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Sidebar);
                     return;
                 }
                 return;
@@ -597,6 +612,10 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Down(MouseButton::Right) => {
+            if mouse.row == 0 {
+                // Tab bar — no context menu
+                return;
+            }
             if app.sidebar_visible && mouse.column < sidebar_w {
                 if mouse.row >= 2 {
                     app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Space);
@@ -721,15 +740,18 @@ async fn handle_mouse(
 
             // Sidebar card hover
             if app.sidebar_visible && mouse.column < SIDEBAR_W {
-                // Each card is 4 content rows (top_border+cwd+stats+bottom) + 1 gap = 5 rows.
-                // Cards start after header (2 rows: "SPACES«" + divider).
-                let content_row = mouse.row.saturating_sub(2);
-                let card_idx = (content_row / 5) as usize;
-                let hovered = if card_idx < app.spaces.len() {
-                    Some(card_idx)
-                } else {
-                    None
-                };
+                let mut y: u16 = 2;
+                let mut hovered = None;
+                for (i, _space) in app.spaces.iter().enumerate() {
+                    if mouse.row >= y && mouse.row < y + 4 {
+                        hovered = Some(i);
+                        break;
+                    }
+                    y += 4;
+                    if i + 1 < app.spaces.len() {
+                        y += 1;
+                    }
+                }
                 if app.sidebar_hovered != hovered {
                     app.sidebar_hovered = hovered;
                     app.needs_redraw = true;

@@ -50,7 +50,7 @@ pub fn term_color(c: &TermColor) -> Color {
     }
 }
 
-pub const SIDEBAR_W: u16 = 14;
+pub const SIDEBAR_W: u16 = 20;
 pub const SIDEBAR_COLLAPSED_W: u16 = 2;
 pub const AGENT_W: u16 = 22;
 

@@ -113,7 +113,7 @@ impl<'a> Performer<'a> {
     fn handle_dec_private_set(&mut self, mode: u16) {
         match mode {
             25 => self.grid.set_cursor_visible(true),
-            1049 => self.grid.enter_alternate_screen(),
+            47 | 1047 | 1049 => self.grid.enter_alternate_screen(),
             _ => {}
         }
     }
@@ -121,7 +121,7 @@ impl<'a> Performer<'a> {
     fn handle_dec_private_reset(&mut self, mode: u16) {
         match mode {
             25 => self.grid.set_cursor_visible(false),
-            1049 => self.grid.exit_alternate_screen(),
+            47 | 1047 | 1049 => self.grid.exit_alternate_screen(),
             _ => {}
         }
     }

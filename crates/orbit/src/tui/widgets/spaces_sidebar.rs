@@ -74,7 +74,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
 
         // Top border row: ╭─ name ─╮ (or ▌─ name ─╮ for active)
         let name_trunc = truncate(&space.name, w.saturating_sub(4) as usize);
-        let dashes_right = w.saturating_sub(4 + name_trunc.len() as u16);
+        let dashes_right = w.saturating_sub(5 + name_trunc.len() as u16);
         let top_left = if is_active { "\u{258C}" } else { "\u{256D}" }; // ▌ or ╭
         let accent_fg = if is_active { ACCENT } else { BORDER };
         // Build the rest of the border after the first char: "─ name ─...─╮"
