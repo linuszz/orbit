@@ -625,7 +625,7 @@ async fn handle_mouse(
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w: u16 = if app.agent_panel_visible { 22 } else { 0 };
+    let agent_w = if app.agent_panel_visible { AGENT_W } else { 0 };
     let term_w = term_size.width;
     let term_h = term_size.height;
 

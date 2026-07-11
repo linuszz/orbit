@@ -25,6 +25,23 @@ const AGENT_PATTERNS: &[&str] = &[
 /// Script runner executables — when detected, also scan their path arguments.
 const SCRIPT_RUNNERS: &[&str] = &["node", "npx", "python", "python3", "deno", "bun"];
 
+/// Output patterns that indicate an agent is waiting for user input (Blocked/Eclipse state).
+const BLOCK_PATTERNS: &[&str] = &[
+    "(y/n)",
+    "(Y/N)",
+    "(yes/no)",
+    "[y/n]",
+    "[Y/n]",
+    "[n/Y]",
+    "[Y/N]",
+    "Do you want",
+    "Are you sure",
+    "Press Enter",
+    "press any key",
+    "Continue?",
+    "Proceed?",
+];
+
 pub struct AgentRegistry {
     agents: RwLock<Vec<AgentInfo>>,
     /// Maps AgentId → OS PID for abort support.
@@ -70,117 +87,227 @@ impl AgentRegistry {
         }
     }
 
-    /// Start a background task that polls for agent child processes of `shell_pid`.
-    /// On non-Linux, this is a no-op because /proc is not available.
+    /// Start a background task that polls for agent child processes of `shell_pid`
+    /// and scans PTY output for block patterns (Satellite Eclipse detection).
+    /// On non-Linux, process detection is skipped (no /proc); block scanning still runs.
     pub fn watch_pane(self: Arc<Self>, pane_id: PaneId, space_id: SpaceId, shell_pid: u32) {
-        #[cfg(not(target_os = "linux"))]
-        {
-            let _ = (pane_id, space_id, shell_pid);
-            return;
-        }
-
-        #[cfg(target_os = "linux")]
         tokio::spawn(async move {
-            // pid → (AgentId, start_time)
+            // pid → (AgentId, start_time); only populated on Linux
             let mut tracked: HashMap<u32, (AgentId, Instant)> = HashMap::new();
             let mut poll_count: u32 = 0;
+            let mut rx = self.event_bus.subscribe();
+            // Start first tick after 500 ms to match old sleep-at-top-of-loop behaviour.
+            let tick_start = tokio::time::Instant::now() + Duration::from_millis(500);
+            let mut interval = tokio::time::interval_at(tick_start, Duration::from_millis(500));
 
             loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                poll_count += 1;
+                tokio::select! {
+                    // --- PTY output: scan for Eclipse block patterns ---
+                    event = rx.recv() => {
+                        match event {
+                            Ok(ServerEvent::PaneOutput { pane_id: ev_pane, data })
+                                if ev_pane == pane_id && !tracked.is_empty() =>
+                            {
+                                // Check last 256 bytes for prompt patterns to avoid
+                                // matching historical content in a large chunk.
+                                let tail_start = data.len().saturating_sub(256);
+                                let tail = String::from_utf8_lossy(&data[tail_start..]);
+                                let is_prompt =
+                                    BLOCK_PATTERNS.iter().any(|p| tail.contains(p));
 
-                if !process_exists(shell_pid) {
-                    break;
-                }
-
-                let children = child_processes(shell_pid);
-                let child_set: HashSet<u32> = children.iter().copied().collect();
-
-                // Detect newly appeared agents.
-                for cpid in &children {
-                    if tracked.contains_key(cpid) {
-                        continue;
-                    }
-                    if let Some(name) = agent_name_for(*cpid) {
-                        let id = AgentId(self.next_id.fetch_add(1, Ordering::Relaxed));
-                        let model = extract_model(*cpid).unwrap_or_default();
-                        let task = extract_task(*cpid);
-                        let info = AgentInfo {
-                            id,
-                            name,
-                            space_id,
-                            pane_id: Some(pane_id),
-                            model,
-                            status: AgentStatus::Working,
-                            detail: Some(AgentDetail {
-                                task,
-                                ..Default::default()
-                            }),
-                        };
-                        tracked.insert(*cpid, (id, Instant::now()));
-                        self.agents.write().await.push(info.clone());
-                        self.pid_map.write().await.insert(id, *cpid);
-                        let _ = self.event_bus.send(ServerEvent::AgentCreated(info));
-                        debug!("agent detected: pid={cpid} id={id:?}");
-                    }
-                }
-
-                // Detect agents that have exited.
-                let exited: Vec<(u32, AgentId)> = tracked
-                    .iter()
-                    .filter(|(pid, _)| !child_set.contains(pid))
-                    .map(|(&pid, &(id, _))| (pid, id))
-                    .collect();
-
-                for (cpid, agent_id) in exited {
-                    tracked.remove(&cpid);
-                    {
-                        let mut agents = self.agents.write().await;
-                        if let Some(a) = agents.iter_mut().find(|a| a.id == agent_id) {
-                            a.status = AgentStatus::Done;
+                                for (agent_id, _) in tracked.values() {
+                                    let current = {
+                                        let agents = self.agents.read().await;
+                                        agents
+                                            .iter()
+                                            .find(|a| a.id == *agent_id)
+                                            .map(|a| a.status.clone())
+                                    };
+                                    match current {
+                                        Some(AgentStatus::Working) if is_prompt => {
+                                            let block_msg = tail
+                                                .lines()
+                                                .rfind(|l| !l.trim().is_empty())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            let new_detail = {
+                                                let mut agents = self.agents.write().await;
+                                                agents
+                                                    .iter_mut()
+                                                    .find(|a| a.id == *agent_id)
+                                                    .filter(|a| {
+                                                        a.status == AgentStatus::Working
+                                                    })
+                                                    .map(|a| {
+                                                        a.status = AgentStatus::Blocked;
+                                                        let d = a
+                                                            .detail
+                                                            .get_or_insert_with(Default::default);
+                                                        d.block_msg = Some(block_msg);
+                                                        a.detail.clone().unwrap()
+                                                    })
+                                            };
+                                            if let Some(detail) = new_detail {
+                                                let _ = self.event_bus.send(
+                                                    ServerEvent::AgentStatusChanged {
+                                                        agent_id: *agent_id,
+                                                        new_status: AgentStatus::Blocked,
+                                                        detail: Some(detail),
+                                                    },
+                                                );
+                                                debug!("agent blocked: id={agent_id:?}");
+                                            }
+                                        }
+                                        Some(AgentStatus::Blocked) if !is_prompt => {
+                                            let new_detail = {
+                                                let mut agents = self.agents.write().await;
+                                                agents
+                                                    .iter_mut()
+                                                    .find(|a| a.id == *agent_id)
+                                                    .filter(|a| {
+                                                        a.status == AgentStatus::Blocked
+                                                    })
+                                                    .map(|a| {
+                                                        a.status = AgentStatus::Working;
+                                                        let d = a
+                                                            .detail
+                                                            .get_or_insert_with(Default::default);
+                                                        d.block_msg = None;
+                                                        a.detail.clone().unwrap()
+                                                    })
+                                            };
+                                            if let Some(detail) = new_detail {
+                                                let _ = self.event_bus.send(
+                                                    ServerEvent::AgentStatusChanged {
+                                                        agent_id: *agent_id,
+                                                        new_status: AgentStatus::Working,
+                                                        detail: Some(detail),
+                                                    },
+                                                );
+                                                debug!("agent unblocked: id={agent_id:?}");
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                            Err(_) => break,
                         }
                     }
-                    self.pid_map.write().await.remove(&agent_id);
-                    let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
-                        agent_id,
-                        new_status: AgentStatus::Done,
-                        detail: None,
-                    });
-                    debug!("agent done: pid={cpid} id={agent_id:?}");
 
-                    // Remove from the visible list after a brief display window.
-                    let registry = Arc::clone(&self);
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(30)).await;
-                        registry.agents.write().await.retain(|a| a.id != agent_id);
-                        let _ = registry.event_bus.send(ServerEvent::AgentRemoved(agent_id));
-                    });
-                }
+                    // --- 500 ms poll: /proc child detection + duration ticks ---
+                    _ = interval.tick() => {
+                        poll_count += 1;
 
-                // Every 10 polls (5s) emit duration updates for active agents.
-                if poll_count % 10 == 0 {
-                    for (agent_id, start) in tracked.values() {
-                        let duration_s = start.elapsed().as_secs() as u32;
-                        // Read current status and update duration_s in a single write lock.
-                        let (current_status, current_detail) = {
-                            let mut agents = self.agents.write().await;
-                            let Some(a) = agents.iter_mut().find(|a| a.id == *agent_id) else {
-                                continue;
-                            };
-                            let d = a.detail.get_or_insert_with(Default::default);
-                            d.duration_s = duration_s;
-                            (a.status.clone(), a.detail.clone().unwrap())
-                        };
-                        let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
-                            agent_id: *agent_id,
-                            new_status: current_status,
-                            detail: Some(current_detail),
-                        });
+                        #[cfg(target_os = "linux")]
+                        if !process_exists(shell_pid) {
+                            break;
+                        }
+
+                        #[cfg(target_os = "linux")]
+                        {
+                            let children = child_processes(shell_pid);
+                            let child_set: HashSet<u32> = children.iter().copied().collect();
+
+                            // Detect newly appeared agents.
+                            for cpid in &children {
+                                if tracked.contains_key(cpid) {
+                                    continue;
+                                }
+                                if let Some(name) = agent_name_for(*cpid) {
+                                    let id =
+                                        AgentId(self.next_id.fetch_add(1, Ordering::Relaxed));
+                                    let model = extract_model(*cpid).unwrap_or_default();
+                                    let task = extract_task(*cpid);
+                                    let info = AgentInfo {
+                                        id,
+                                        name,
+                                        space_id,
+                                        pane_id: Some(pane_id),
+                                        model,
+                                        status: AgentStatus::Working,
+                                        detail: Some(AgentDetail {
+                                            task,
+                                            ..Default::default()
+                                        }),
+                                    };
+                                    tracked.insert(*cpid, (id, Instant::now()));
+                                    self.agents.write().await.push(info.clone());
+                                    self.pid_map.write().await.insert(id, *cpid);
+                                    let _ = self.event_bus.send(ServerEvent::AgentCreated(info));
+                                    debug!("agent detected: pid={cpid} id={id:?}");
+                                }
+                            }
+
+                            // Detect agents that have exited.
+                            let exited: Vec<(u32, AgentId)> = tracked
+                                .iter()
+                                .filter(|(pid, _)| !child_set.contains(pid))
+                                .map(|(&pid, &(id, _))| (pid, id))
+                                .collect();
+
+                            for (cpid, agent_id) in exited {
+                                tracked.remove(&cpid);
+                                {
+                                    let mut agents = self.agents.write().await;
+                                    if let Some(a) =
+                                        agents.iter_mut().find(|a| a.id == agent_id)
+                                    {
+                                        a.status = AgentStatus::Done;
+                                    }
+                                }
+                                self.pid_map.write().await.remove(&agent_id);
+                                let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
+                                    agent_id,
+                                    new_status: AgentStatus::Done,
+                                    detail: None,
+                                });
+                                debug!("agent done: pid={cpid} id={agent_id:?}");
+
+                                let registry = Arc::clone(&self);
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(Duration::from_secs(30)).await;
+                                    registry
+                                        .agents
+                                        .write()
+                                        .await
+                                        .retain(|a| a.id != agent_id);
+                                    let _ = registry
+                                        .event_bus
+                                        .send(ServerEvent::AgentRemoved(agent_id));
+                                });
+                            }
+                        }
+
+                        // Every 10 polls (~5 s): emit duration updates.
+                        if poll_count % 10 == 0 {
+                            for (agent_id, start) in tracked.values() {
+                                let duration_s = start.elapsed().as_secs() as u32;
+                                let (current_status, current_detail) = {
+                                    let mut agents = self.agents.write().await;
+                                    let Some(a) =
+                                        agents.iter_mut().find(|a| a.id == *agent_id)
+                                    else {
+                                        continue;
+                                    };
+                                    let d = a.detail.get_or_insert_with(Default::default);
+                                    d.duration_s = duration_s;
+                                    (a.status.clone(), a.detail.clone().unwrap())
+                                };
+                                let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
+                                    agent_id: *agent_id,
+                                    new_status: current_status,
+                                    detail: Some(current_detail),
+                                });
+                            }
+                        }
                     }
                 }
             }
 
-            // Shell exited — mark any remaining tracked agents as done.
+            // Shell exited (or event bus closed) — mark remaining tracked agents done.
             for (cpid, (agent_id, _)) in &tracked {
                 {
                     let mut agents = self.agents.write().await;
