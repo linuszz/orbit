@@ -492,6 +492,26 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                         }
                     }
                 }
+                // r: respond to blocked agent (opens Eclipse modal)
+                KeyCode::Char('r') => {
+                    let sel = *selected;
+                    if let Some(agent) = app.agents.get(sel) {
+                        if agent.status == orbit_protocol::AgentStatus::Blocked {
+                            let agent_id = agent.id;
+                            crate::tui::widgets::eclipse_modal::open(app, agent_id);
+                        }
+                    }
+                }
+                // s: stop a working agent
+                KeyCode::Char('s') => {
+                    let sel = *selected;
+                    if let Some(agent) = app.agents.get(sel) {
+                        if agent.status == orbit_protocol::AgentStatus::Working {
+                            let agent_id = agent.id;
+                            let _ = writer.send(ClientMessage::AgentAbort { agent_id }).await;
+                        }
+                    }
+                }
                 KeyCode::Char('q') | KeyCode::Esc => {
                     app.mode = InputMode::Normal;
                 }

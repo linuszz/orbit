@@ -393,11 +393,26 @@ fn render_card(
         false
     };
     let card_bg = if is_selected { BG_CARD } else { BG_SECONDARY };
-    // Orange accent marker rendered instead of the leading space on selected cards.
+    // Leading accent mark: orange ▸ for keyboard-selected cards; animated ▌ for blocked/error
+    // cards (left-border accent, spec §3.3 "边框: Warning"); plain space otherwise.
     let sel_mark = if is_selected {
-        Span::styled("\u{25B8}", Style::default().fg(ACCENT).bg(card_bg)) // ▸
+        Span::styled("\u{25B8}", Style::default().fg(ACCENT).bg(card_bg)) // ▸ orange selection
     } else {
-        Span::styled(" ", Style::default().bg(card_bg))
+        match agent.status {
+            AgentStatus::Blocked => Span::styled(
+                "\u{258C}", // ▌ half-block left border
+                Style::default()
+                    .fg(blocked_pulse_color(app.tick_count))
+                    .bg(card_bg),
+            ),
+            AgentStatus::Error => Span::styled(
+                "\u{258C}",
+                Style::default()
+                    .fg(error_blink_color(app.tick_count))
+                    .bg(card_bg),
+            ),
+            _ => Span::styled(" ", Style::default().bg(card_bg)),
+        }
     };
 
     // Row 0: icon + sel_mark + name (11 cols) + " " + status (7 cols) = 21
@@ -520,10 +535,23 @@ fn render_card(
         };
         let task = truncate_str(task_str, w.saturating_sub(1) as usize);
         let task_body = format!("{:<width$}", task, width = w.saturating_sub(1) as usize);
+        // Blocked: block reason highlighted in ACCENT_BLOCKED + Bold (spec §7.1 Level 2).
+        // Error: error text in ACCENT_ERROR.
+        let (task_fg, task_mod) = match agent.status {
+            AgentStatus::Blocked => (ACCENT_BLOCKED, Modifier::BOLD),
+            AgentStatus::Error => (ACCENT_ERROR, Modifier::empty()),
+            _ => (FG_SECONDARY, Modifier::empty()),
+        };
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 sel_mark.clone(),
-                Span::styled(task_body, Style::default().fg(FG_SECONDARY).bg(card_bg)),
+                Span::styled(
+                    task_body,
+                    Style::default()
+                        .fg(task_fg)
+                        .bg(card_bg)
+                        .add_modifier(task_mod),
+                ),
             ])),
             Rect {
                 x,
