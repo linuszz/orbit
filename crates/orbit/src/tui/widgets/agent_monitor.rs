@@ -566,9 +566,12 @@ fn render_card(
         );
     }
 
-    // Row 3: progress bar (deterministic when Some(progress), indeterminate animation otherwise).
+    // Row 3: progress bar (Working/Blocked/Error show bar; spec §3.3).
     {
-        let show_bar = matches!(agent.status, AgentStatus::Working | AgentStatus::Blocked);
+        let show_bar = matches!(
+            agent.status,
+            AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Error
+        );
         let progress = agent.detail.as_ref().and_then(|d| d.progress);
         if show_bar {
             // " " + bar (w-5) + suffix (4) = w

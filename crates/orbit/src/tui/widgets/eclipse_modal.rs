@@ -327,7 +327,11 @@ pub fn open(state: &mut crate::app::App, agent_id: orbit_protocol::AgentId) {
             .unwrap_or_default();
         let task = agent.detail.as_ref().and_then(|d| d.task.clone());
         let progress = agent.detail.as_ref().and_then(|d| d.progress);
-        let blocked_duration_s = agent.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
+        let blocked_duration_s = state
+            .agent_blocked_times
+            .get(&agent_id)
+            .map(|t| t.elapsed().as_secs() as u32)
+            .unwrap_or(0);
         let cwd = state
             .spaces
             .iter()

@@ -243,6 +243,8 @@ pub struct App {
     pub agent_metrics: HashMap<AgentId, AgentMetrics>,
     /// Client-side start times for smooth live duration display.
     pub agent_start_times: HashMap<AgentId, Instant>,
+    /// Timestamps when each agent entered the Blocked state (for accurate "Blocked: Xm" display).
+    pub agent_blocked_times: HashMap<AgentId, Instant>,
     pub agent_hovered: Option<AgentHover>,
     pub agent_scroll_offset: usize,
     pub eclipse_modal: Option<EclipseModalState>,
@@ -384,6 +386,19 @@ impl App {
                         a.id,
                         Instant::now() - std::time::Duration::from_secs(duration_s as u64),
                     );
+                }
+                m
+            },
+            agent_blocked_times: {
+                let mut m = HashMap::new();
+                for a in &state.agents {
+                    if a.status == AgentStatus::Blocked {
+                        let duration_s = a.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
+                        m.insert(
+                            a.id,
+                            Instant::now() - std::time::Duration::from_secs(duration_s as u64),
+                        );
+                    }
                 }
                 m
             },
@@ -780,6 +795,13 @@ impl App {
                 if let Some(agent) = self.agents.iter_mut().find(|a| a.id == *agent_id) {
                     agent.status = new_status.clone();
                     agent.detail = detail.clone();
+                }
+                if new_status == &AgentStatus::Blocked {
+                    self.agent_blocked_times
+                        .entry(*agent_id)
+                        .or_insert_with(Instant::now);
+                } else {
+                    self.agent_blocked_times.remove(agent_id);
                 }
                 self.sort_agents();
                 self.needs_redraw = true;
