@@ -614,6 +614,17 @@ impl App {
                     .position(|s| s.id == state.active_space)
                     .unwrap_or(0);
                 self.agents = state.agents.clone();
+                // Re-seed start times for agents from the reconnected state.
+                for a in &state.agents {
+                    self.agent_start_times.entry(a.id).or_insert_with(|| {
+                        let duration_s = a.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
+                        Instant::now() - std::time::Duration::from_secs(duration_s as u64)
+                    });
+                }
+                self.agent_start_times
+                    .retain(|id, _| state.agents.iter().any(|a| a.id == *id));
+                self.agent_metrics
+                    .retain(|id, _| state.agents.iter().any(|a| a.id == *id));
                 self.sort_agents();
                 self.needs_redraw = true;
             }
