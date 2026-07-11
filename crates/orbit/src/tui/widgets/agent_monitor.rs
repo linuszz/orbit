@@ -382,7 +382,7 @@ fn render_card(
         );
     }
 
-    // Row 1: " " + model (left) + [rss] + duration (right-aligned) — total w cols
+    // Row 1: " {cwd_short} · {model}  {rss} {dur}" — cwd basename left, metrics right.
     {
         // Live duration from client-side start time; falls back to detail.duration_s.
         let duration_s = app
@@ -399,24 +399,42 @@ fn render_card(
         let rss_str = metrics.and_then(|m| m.rss_kb).map(format_rss);
         let inner_w = w.saturating_sub(1) as usize; // 1 leading space
 
-        // right = "[rss ]dur" or just "dur"
+        // Short cwd: basename of the space's working directory.
+        let cwd_short = app
+            .spaces
+            .iter()
+            .find(|s| s.space_id == agent.space_id)
+            .and_then(|s| {
+                std::path::Path::new(&s.cwd)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(str::to_string)
+            });
+
+        // right = "rss dur" or just "dur"
         let right = match (&rss_str, dur_str.is_empty()) {
             (Some(rss), false) => format!("{} {}", rss, dur_str),
             (Some(rss), true) => rss.clone(),
             (None, false) => dur_str.clone(),
             (None, true) => String::new(),
         };
-        let model_max = if right.is_empty() {
+
+        // left = "cwd · model" or just model if no cwd
+        let left_content = match &cwd_short {
+            Some(cwd) if !cwd.is_empty() => format!("{} \u{00B7} {}", cwd, agent.model),
+            _ => agent.model.clone(),
+        };
+        let left_max = if right.is_empty() {
             inner_w
         } else {
-            inner_w.saturating_sub(right.len() + 1) // 1 space before right
+            inner_w.saturating_sub(right.len() + 1)
         };
-        let model = truncate_str(&agent.model, model_max);
+        let left = truncate_str(&left_content, left_max);
         let model_text = if right.is_empty() {
-            format!(" {:<width$}", model, width = inner_w)
+            format!(" {:<width$}", left, width = inner_w)
         } else {
-            let pad = inner_w.saturating_sub(model.len() + right.len());
-            format!(" {}{}{}", model, " ".repeat(pad), right)
+            let pad = inner_w.saturating_sub(left.len() + right.len());
+            format!(" {}{}{}", left, " ".repeat(pad), right)
         };
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
