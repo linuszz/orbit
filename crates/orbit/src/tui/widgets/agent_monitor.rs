@@ -463,7 +463,12 @@ fn render_card(
                         }
                     })
                     .collect();
-                (b, "    ".to_string())
+                // Suffix: show cpu% when available, else blank (4 chars).
+                let sfx = metrics
+                    .and_then(|m| m.cpu_percent)
+                    .map(|c| format!("{:3.0}%", c))
+                    .unwrap_or_else(|| "    ".to_string());
+                (b, sfx)
             };
             frame.render_widget(
                 Paragraph::new(Line::from(vec![

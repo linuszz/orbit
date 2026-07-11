@@ -98,6 +98,9 @@ impl AgentRegistry {
             let mut tracked: HashMap<u32, (AgentId, Instant)> = HashMap::new();
             // Last meaningful output line seen from this pane (shown in card row 2).
             let mut last_output_line = String::new();
+            // pid → cpu ticks at last 5-second sample (for cpu% delta).
+            let mut cpu_prev: HashMap<u32, u64> = HashMap::new();
+            let mut cpu_prev_time = Instant::now();
             let mut poll_count: u32 = 0;
             let mut rx = self.event_bus.subscribe();
             // Start first tick after 500 ms to match old sleep-at-top-of-loop behaviour.
@@ -296,6 +299,9 @@ impl AgentRegistry {
 
                         // Every 10 polls (~5 s): emit duration updates and resource metrics.
                         if poll_count % 10 == 0 {
+                            #[cfg(target_os = "linux")]
+                            let elapsed_secs = cpu_prev_time.elapsed().as_secs_f32();
+
                             for (cpid, (agent_id, start)) in &tracked {
                                 let duration_s = start.elapsed().as_secs() as u32;
                                 let (current_status, current_detail) = {
@@ -318,6 +324,18 @@ impl AgentRegistry {
                                 #[cfg(target_os = "linux")]
                                 {
                                     let rss_kb = read_rss_kb(*cpid);
+                                    let current_ticks =
+                                        read_cpu_ticks(*cpid).unwrap_or(0);
+                                    // clk_tck = 100 ticks/s on virtually all Linux systems.
+                                    const CLK_TCK: f32 = 100.0;
+                                    let cpu_percent = if elapsed_secs > 0.5 {
+                                        let prev = cpu_prev.get(cpid).copied().unwrap_or(current_ticks);
+                                        let delta = current_ticks.saturating_sub(prev) as f32;
+                                        Some((delta / (elapsed_secs * CLK_TCK) * 100.0).min(100.0))
+                                    } else {
+                                        None
+                                    };
+                                    cpu_prev.insert(*cpid, current_ticks);
                                     let recent = if last_output_line.is_empty() {
                                         vec![]
                                     } else {
@@ -326,12 +344,17 @@ impl AgentRegistry {
                                     let _ = self.event_bus.send(ServerEvent::AgentMetricsUpdated {
                                         agent_id: *agent_id,
                                         metrics: AgentMetrics {
-                                            cpu_percent: None,
+                                            cpu_percent,
                                             rss_kb,
                                             recent_lines: recent,
                                         },
                                     });
                                 }
+                            }
+
+                            #[cfg(target_os = "linux")]
+                            {
+                                cpu_prev_time = Instant::now();
                             }
                         }
                     }
@@ -462,6 +485,22 @@ fn read_rss_kb(pid: u32) -> Option<u32> {
         }
     }
     None
+}
+
+/// Read total CPU ticks (utime+stime) for a process from /proc/<pid>/stat.
+/// The `comm` field is in parentheses and may contain spaces, so we find the
+/// closing `)` and index fields relative to it.
+#[cfg(target_os = "linux")]
+fn read_cpu_ticks(pid: u32) -> Option<u64> {
+    let content = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Skip past closing ')' of comm field; remaining fields start with state.
+    let rest = content[content.find(')')?.checked_add(1)?..].trim_start();
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    // After ')': state(0) ppid(1) pgrp(2) session(3) tty_nr(4) tpgid(5) flags(6)
+    // minflt(7) cminflt(8) majflt(9) cmajflt(10) utime(11) stime(12)
+    let utime: u64 = fields.get(11)?.parse().ok()?;
+    let stime: u64 = fields.get(12)?.parse().ok()?;
+    Some(utime + stime)
 }
 
 /// Returns the immediate child PIDs of `parent_pid`.

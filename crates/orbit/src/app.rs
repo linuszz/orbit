@@ -137,6 +137,18 @@ pub static COMMANDS: &[CommandDef] = &[
         group: "Help",
         shortcut: "?",
     },
+    CommandDef {
+        id: "agent_scroll_up",
+        label: "Scroll Satellites Up",
+        group: "Satellite",
+        shortcut: "k",
+    },
+    CommandDef {
+        id: "agent_scroll_down",
+        label: "Scroll Satellites Down",
+        group: "Satellite",
+        shortcut: "j",
+    },
 ];
 
 pub struct PaneState {

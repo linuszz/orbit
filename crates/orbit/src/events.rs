@@ -129,6 +129,17 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
         }
         "toggle_sidebar" => app.sidebar_visible = !app.sidebar_visible,
         "toggle_agent" => app.agent_panel_visible = !app.agent_panel_visible,
+        "agent_scroll_up" => {
+            if app.agent_panel_visible {
+                app.agent_scroll_offset = app.agent_scroll_offset.saturating_sub(1);
+            }
+        }
+        "agent_scroll_down" => {
+            if app.agent_panel_visible {
+                let max = app.agents.len().saturating_sub(1);
+                app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max);
+            }
+        }
         "detach" => app.should_quit = true,
         "help" => app.show_help = true,
         _ => {}
