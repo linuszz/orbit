@@ -28,6 +28,10 @@ pub struct CellGrid {
     saved_scroll_top: u16,
     saved_scroll_bottom: u16,
     pub in_alternate_screen: bool,
+
+    // DECSC / DECRC cursor save-restore (ESC 7 / ESC 8, CSI s / CSI u)
+    cursor_saved_x: u16,
+    cursor_saved_y: u16,
 }
 
 impl CellGrid {
@@ -57,6 +61,8 @@ impl CellGrid {
             saved_scroll_top: 0,
             saved_scroll_bottom: rows.saturating_sub(1),
             in_alternate_screen: false,
+            cursor_saved_x: 0,
+            cursor_saved_y: 0,
         }
     }
 
@@ -360,6 +366,23 @@ impl CellGrid {
         self.cursor_y = self.cursor_y.min(new_rows.saturating_sub(1));
         self.scroll_top = 0;
         self.scroll_bottom = new_rows.saturating_sub(1);
+    }
+
+    pub fn save_cursor(&mut self) {
+        self.cursor_saved_x = self.cursor_x;
+        self.cursor_saved_y = self.cursor_y;
+    }
+
+    pub fn restore_cursor(&mut self) {
+        self.cursor_x = self.cursor_saved_x.min(self.cols.saturating_sub(1));
+        self.cursor_y = self.cursor_saved_y.min(self.rows.saturating_sub(1));
+    }
+
+    pub fn erase_chars(&mut self, n: u16) {
+        let start = self.cell_index(self.cursor_x, self.cursor_y);
+        let row_end = (self.cursor_y as usize + 1) * self.cols as usize;
+        let end = (start + n as usize).min(row_end);
+        self.cells[start..end].fill(Cell::default());
     }
 
     pub fn set_title(&mut self, title: String) {

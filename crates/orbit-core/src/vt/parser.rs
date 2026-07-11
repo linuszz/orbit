@@ -85,6 +85,9 @@ impl<'a> vte::Perform for Performer<'a> {
             ([], 'm') => self.grid.set_sgr(&p),
             ([], 'r') => self.grid.set_scroll_region(p0, p1),
             ([], 'c') => self.grid.da1_queried = true,
+            ([], 's') => self.grid.save_cursor(),
+            ([], 'u') => self.grid.restore_cursor(),
+            ([], 'X') => self.grid.erase_chars(p0.max(1)),
             ([b'?'], 'h') => self.handle_dec_private_set(p0),
             ([b'?'], 'l') => self.handle_dec_private_reset(p0),
             _ => {}
@@ -103,8 +106,11 @@ impl<'a> vte::Perform for Performer<'a> {
     }
 
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
-        if byte == b'M' {
-            self.grid.reverse_index();
+        match byte {
+            b'7' => self.grid.save_cursor(),
+            b'8' => self.grid.restore_cursor(),
+            b'M' => self.grid.reverse_index(),
+            _ => {}
         }
     }
 }

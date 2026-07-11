@@ -6,7 +6,7 @@ use orbit_protocol::{ClientMessage, ServerEvent, PROTOCOL_VERSION};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::debug;
 
-use crate::session::SessionState;
+use crate::session::SpaceManager;
 
 type Stream = interprocess::local_socket::tokio::Stream;
 
@@ -29,7 +29,7 @@ async fn read_msg(stream: &mut Stream) -> Result<ClientMessage> {
     Ok(msg)
 }
 
-pub async fn handle_client(mut stream: Stream, session: Arc<SessionState>) -> Result<()> {
+pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>) -> Result<()> {
     match read_msg(&mut stream).await {
         Ok(ClientMessage::Hello {
             protocol_version, ..
@@ -39,9 +39,12 @@ pub async fn handle_client(mut stream: Stream, session: Arc<SessionState>) -> Re
                     &mut stream,
                     &ServerEvent::ProtocolError {
                         code: 1,
-                        message: format!("version mismatch: client={protocol_version}, server={PROTOCOL_VERSION}"),
+                        message: format!(
+                            "version mismatch: client={protocol_version}, server={PROTOCOL_VERSION}"
+                        ),
                     },
-                ).await;
+                )
+                .await;
                 bail!("protocol version mismatch");
             }
         }
@@ -54,12 +57,12 @@ pub async fn handle_client(mut stream: Stream, session: Arc<SessionState>) -> Re
             server_version: env!("CARGO_PKG_VERSION").to_string(),
             protocol_version: PROTOCOL_VERSION,
             capabilities: orbit_protocol::Capabilities::default(),
-            state: session.collect_full_state().await,
+            state: space_manager.collect_full_state().await,
         },
     )
     .await?;
 
-    let mut rx = session.event_bus.subscribe();
+    let mut rx = space_manager.event_bus.subscribe();
 
     loop {
         tokio::select! {
@@ -67,22 +70,44 @@ pub async fn handle_client(mut stream: Stream, session: Arc<SessionState>) -> Re
             msg = read_msg(&mut stream) => {
                 let msg = match msg { Ok(m) => m, Err(e) => { debug!("client read: {e:#}"); break; } };
                 match msg {
-                    ClientMessage::PaneInput { tab_id, pane_id, data } => session.send_input(tab_id, pane_id, data).await,
-                    ClientMessage::ClosePane { tab_id, pane_id } => session.close_pane(tab_id, pane_id).await,
-                    ClientMessage::SplitPane { tab_id, direction, .. } => {
-                        if let Err(e) = session.split_pane(tab_id, direction).await { tracing::warn!("split: {e:#}"); }
+                    ClientMessage::PaneInput { tab_id, pane_id, data } => {
+                        let session = space_manager.active_session().await;
+                        session.send_input(tab_id, pane_id, data).await;
                     }
-                    ClientMessage::ResizePane { tab_id, pane_id, cols, rows } => session.resize_pane(tab_id, pane_id, cols, rows).await,
-                    ClientMessage::FocusPane { tab_id, pane_id } => session.focus_pane(tab_id, pane_id).await,
+                    ClientMessage::ClosePane { tab_id, pane_id } => {
+                        let session = space_manager.active_session().await;
+                        session.close_pane(tab_id, pane_id).await;
+                    }
+                    ClientMessage::SplitPane { tab_id, direction, .. } => {
+                        let session = space_manager.active_session().await;
+                        if let Err(e) = session.split_pane(tab_id, direction).await {
+                            tracing::warn!("split: {e:#}");
+                        }
+                    }
+                    ClientMessage::ResizePane { tab_id, pane_id, cols, rows } => {
+                        let session = space_manager.active_session().await;
+                        session.resize_pane(tab_id, pane_id, cols, rows).await;
+                    }
+                    ClientMessage::FocusPane { tab_id, pane_id } => {
+                        let session = space_manager.active_session().await;
+                        session.focus_pane(tab_id, pane_id).await;
+                    }
                     ClientMessage::NewTab { name } => {
+                        let session = space_manager.active_session().await;
                         if let Err(e) = session.new_tab(name).await {
                             tracing::warn!("new_tab: {e:#}");
                         }
                     }
-                    ClientMessage::CloseTab { tab_id } => session.close_tab(tab_id).await,
-                    ClientMessage::SwitchTab { tab_id } => session.switch_tab(tab_id).await,
+                    ClientMessage::CloseTab { tab_id } => {
+                        let session = space_manager.active_session().await;
+                        session.close_tab(tab_id).await;
+                    }
+                    ClientMessage::SwitchTab { tab_id } => {
+                        let session = space_manager.active_session().await;
+                        session.switch_tab(tab_id).await;
+                    }
                     ClientMessage::RequestFullState => {
-                        let s = session.collect_full_state().await;
+                        let s = space_manager.collect_full_state().await;
                         let _ = write_msg(&mut stream, &ServerEvent::Welcome {
                             server_version: env!("CARGO_PKG_VERSION").to_string(),
                             protocol_version: PROTOCOL_VERSION,
@@ -95,8 +120,15 @@ pub async fn handle_client(mut stream: Stream, session: Arc<SessionState>) -> Re
                             let _ = cb.set_text(text);
                         }
                     }
+                    ClientMessage::CreateSpace { name } => {
+                        if let Err(e) = space_manager.create_space(name).await {
+                            tracing::warn!("create_space: {e:#}");
+                        }
+                    }
                     ClientMessage::SwitchSpace { space_id } => {
-                        session.switch_space(space_id).await;
+                        if let Err(e) = space_manager.switch_space(space_id).await {
+                            tracing::warn!("switch_space: {e:#}");
+                        }
                     }
                     _ => {}
                 }

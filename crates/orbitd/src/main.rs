@@ -12,7 +12,7 @@ mod ipc;
 mod pty;
 mod session;
 
-use crate::session::SessionState;
+use crate::session::SpaceManager;
 use orbit_protocol::ServerEvent;
 
 fn default_socket_path() -> std::path::PathBuf {
@@ -86,11 +86,12 @@ async fn main() -> Result<()> {
     let (event_bus, _rx) = broadcast::channel::<ServerEvent>(256);
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-    let session = Arc::new(SessionState::new(event_bus, shell, ".".to_string(), 80, 24).await?);
+    let space_manager =
+        Arc::new(SpaceManager::new(event_bus, shell, ".".to_string(), 80, 24).await?);
     info!("orbitd ready — 1 space, 1 pane");
 
     tokio::select! {
-        res = accept_loop(listener, session.clone()) => {
+        res = accept_loop(listener, space_manager.clone()) => {
             if let Err(e) = res { error!("accept loop error: {e:#}"); }
         }
         _ = wait_for_signal() => {}
@@ -121,13 +122,13 @@ async fn wait_for_signal() {
 
 async fn accept_loop(
     listener: interprocess::local_socket::tokio::Listener,
-    session: Arc<SessionState>,
+    space_manager: Arc<SpaceManager>,
 ) -> Result<()> {
     loop {
         let stream = listener.accept().await?;
-        let session = session.clone();
+        let space_manager = space_manager.clone();
         tokio::spawn(async move {
-            if let Err(e) = ipc::handle_client(stream, session).await {
+            if let Err(e) = ipc::handle_client(stream, space_manager).await {
                 error!("client error: {e:#}");
             }
         });

@@ -137,8 +137,23 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
     app.needs_redraw = true;
 }
 
-async fn execute_context_action(id: &str, app: &mut App, writer: &IpcWriter) {
+async fn execute_context_action(
+    id: &str,
+    target: &ContextMenuTarget,
+    app: &mut App,
+    writer: &IpcWriter,
+) {
     match id {
+        "new_tab" => {
+            let _ = writer.send(ClientMessage::NewTab { name: None }).await;
+        }
+        "close_tab" => {
+            if let ContextMenuTarget::Tab(tab_id) = target {
+                let _ = writer
+                    .send(ClientMessage::CloseTab { tab_id: *tab_id })
+                    .await;
+            }
+        }
         "split_h" => {
             app.pending_split = Some((app.active_pane, SplitDir::Horizontal));
             let _ = writer
@@ -453,9 +468,10 @@ async fn handle_mouse(
                                 menu.items.get(menu.selected)
                             {
                                 let id = *id;
+                                let target = menu.target.clone();
                                 app.context_menu = None;
                                 app.needs_redraw = true;
-                                execute_context_action(id, app, writer).await;
+                                execute_context_action(id, &target, app, writer).await;
                             }
                             return;
                         }
@@ -501,6 +517,12 @@ async fn handle_mouse(
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             if mouse.row == 0 {
+                // Expand collapsed sidebar when clicking the » row
+                if !app.sidebar_visible && mouse.column < SIDEBAR_COLLAPSED_W {
+                    app.sidebar_visible = true;
+                    app.needs_redraw = true;
+                    return;
+                }
                 // Handle « collapse button first
                 if app.sidebar_visible && mouse.column == SIDEBAR_W - 1 {
                     app.sidebar_visible = false;
@@ -518,6 +540,7 @@ async fn handle_mouse(
                         if mouse.column >= x && mouse.column < x + label_len {
                             app.selection = None;
                             app.active_tab = i;
+                            app.active_tab_id = tab.id;
                             if let Some(&first) = app.pane_tree().leaves().first() {
                                 app.active_pane = first;
                             }
@@ -539,8 +562,16 @@ async fn handle_mouse(
                 }
             }
 
-            // Sidebar: expand button (») when collapsed
+            // Collapsed sidebar: clicking a space number row switches space and expands
             if !app.sidebar_visible && mouse.column < SIDEBAR_COLLAPSED_W && mouse.row > 0 {
+                let space_idx = (mouse.row - 1) as usize;
+                if space_idx < app.spaces.len() {
+                    app.active_space_idx = space_idx;
+                    let space_id = app.spaces[space_idx].space_id;
+                    let _ = writer
+                        .send(orbit_protocol::ClientMessage::SwitchSpace { space_id })
+                        .await;
+                }
                 app.sidebar_visible = true;
                 app.needs_redraw = true;
                 return;
@@ -549,8 +580,8 @@ async fn handle_mouse(
             if app.sidebar_visible && mouse.column < SIDEBAR_W {
                 let mut y: u16 = 2; // after header + divider
                 for (i, space) in app.spaces.iter().enumerate() {
-                    // card occupies 4 rows: top_border, cwd, stats, bottom_border
-                    if mouse.row >= y && mouse.row < y + 4 {
+                    // card occupies 3 rows: name, cwd, stats
+                    if mouse.row >= y && mouse.row < y + 3 {
                         let space_id = space.space_id;
                         app.active_space_idx = i;
                         let _ = writer
@@ -559,15 +590,28 @@ async fn handle_mouse(
                         app.needs_redraw = true;
                         return;
                     }
-                    y += 4;
+                    y += 3;
                     // gap row between cards (not after last)
                     if i + 1 < app.spaces.len() {
                         y += 1;
                     }
                 }
-                // [+] New button row
+                // [+] New Space button row
                 if mouse.row == y {
-                    app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Sidebar);
+                    let _ = writer
+                        .send(orbit_protocol::ClientMessage::CreateSpace { name: None })
+                        .await;
+                    app.needs_redraw = true;
+                    return;
+                }
+                // Flight Deck button row
+                if mouse.row == y + 1 {
+                    app.mode = InputMode::CommandPalette {
+                        search: String::new(),
+                        selected: 0,
+                        search_focused: false,
+                    };
+                    app.needs_redraw = true;
                     return;
                 }
                 return;
@@ -612,8 +656,24 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Down(MouseButton::Right) => {
+            if mouse.row == 0 && mouse.column >= sidebar_w {
+                // Tab bar right-click: show tab context menu
+                let mut x = sidebar_w;
+                for tab in app.tabs.iter() {
+                    let label_len = tab.name.len() as u16 + 2;
+                    if mouse.column >= x && mouse.column < x + label_len {
+                        app.open_context_menu(
+                            mouse.column,
+                            mouse.row,
+                            ContextMenuTarget::Tab(tab.id),
+                        );
+                        return;
+                    }
+                    x += label_len;
+                }
+                return;
+            }
             if mouse.row == 0 {
-                // Tab bar — no context menu
                 return;
             }
             if app.sidebar_visible && mouse.column < sidebar_w {
@@ -743,11 +803,11 @@ async fn handle_mouse(
                 let mut y: u16 = 2;
                 let mut hovered = None;
                 for (i, _space) in app.spaces.iter().enumerate() {
-                    if mouse.row >= y && mouse.row < y + 4 {
+                    if mouse.row >= y && mouse.row < y + 3 {
                         hovered = Some(i);
                         break;
                     }
-                    y += 4;
+                    y += 3;
                     if i + 1 < app.spaces.len() {
                         y += 1;
                     }

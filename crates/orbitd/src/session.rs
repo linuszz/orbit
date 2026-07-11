@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 use anyhow::Context;
 use orbit_protocol::{
@@ -79,14 +80,16 @@ pub struct SessionState {
     pub tabs: RwLock<HashMap<TabId, TabState>>,
     pub tab_order: RwLock<Vec<TabId>>,
     pub active_tab: RwLock<TabId>,
-    pub next_pane_id: AtomicU32,
-    pub next_tab_id: AtomicU32,
+    pub next_pane_id: Arc<AtomicU32>,
+    pub next_tab_id: Arc<AtomicU32>,
     pub event_bus: broadcast::Sender<ServerEvent>,
     pub shell: String,
     pub cwd: String,
 }
 
 impl SessionState {
+    // Standalone constructor with self-owned counters; kept for test/standalone use.
+    #[allow(dead_code)]
     pub async fn new(
         event_bus: broadcast::Sender<ServerEvent>,
         shell: String,
@@ -126,8 +129,64 @@ impl SessionState {
             tabs: RwLock::new(tabs),
             tab_order: RwLock::new(vec![tab_id]),
             active_tab: RwLock::new(tab_id),
-            next_pane_id: AtomicU32::new(1),
-            next_tab_id: AtomicU32::new(1),
+            next_pane_id: Arc::new(AtomicU32::new(1)),
+            next_tab_id: Arc::new(AtomicU32::new(1)),
+            event_bus,
+            shell,
+            cwd,
+        })
+    }
+
+    /// Create a session with shared pane/tab ID counters (used by SpaceManager).
+    // All 9 arguments are distinct required inputs; a builder would be heavier than necessary.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn with_counters(
+        event_bus: broadcast::Sender<ServerEvent>,
+        shell: String,
+        cwd: String,
+        cols: u16,
+        rows: u16,
+        space_id: SpaceId,
+        space_name: String,
+        next_pane_id: Arc<AtomicU32>,
+        next_tab_id: Arc<AtomicU32>,
+    ) -> anyhow::Result<Self> {
+        let pane_id = PaneId(next_pane_id.fetch_add(1, Ordering::Relaxed));
+        let tab_id = TabId(next_tab_id.fetch_add(1, Ordering::Relaxed));
+        let tab_name = format!("tab{}", tab_id.0);
+
+        let handles = pty::spawn_pty(pane_id, &shell, &cwd, cols, rows, event_bus.clone()).await?;
+
+        let mut panes = HashMap::new();
+        panes.insert(
+            pane_id,
+            PaneEntry {
+                input_tx: handles.input_tx,
+                vt_parser: handles.parser,
+                master: handles.master,
+                child: handles.child,
+            },
+        );
+
+        let mut tabs = HashMap::new();
+        tabs.insert(
+            tab_id,
+            TabState {
+                name: tab_name,
+                layout: PaneLayout::Leaf(pane_id),
+                active_pane: pane_id,
+            },
+        );
+
+        Ok(Self {
+            space_id,
+            space_name,
+            panes: RwLock::new(panes),
+            tabs: RwLock::new(tabs),
+            tab_order: RwLock::new(vec![tab_id]),
+            active_tab: RwLock::new(tab_id),
+            next_pane_id,
+            next_tab_id,
             event_bus,
             shell,
             cwd,
@@ -343,11 +402,6 @@ impl SessionState {
             .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 
-    pub async fn switch_space(&self, _space_id: orbit_protocol::SpaceId) {
-        // Multi-space switching: future implementation.
-        // For now the daemon runs a single space; this message is accepted but ignored.
-    }
-
     pub async fn send_input(&self, _tab_id: TabId, pane_id: PaneId, data: Vec<u8>) {
         let panes = self.panes.read().await;
         if let Some(entry) = panes.get(&pane_id) {
@@ -387,15 +441,7 @@ impl SessionState {
             .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 
-    pub async fn collect_full_state(&self) -> FullState {
-        FullState {
-            spaces: vec![self.collect_space_info().await],
-            active_space: self.space_id,
-            agents: vec![],
-        }
-    }
-
-    async fn active_pane_size(&self, tab_id: &TabId) -> (u16, u16) {
+    pub async fn active_pane_size(&self, tab_id: &TabId) -> (u16, u16) {
         let tabs = self.tabs.read().await;
         if let Some(tab) = tabs.get(tab_id) {
             if let Some(entry) = self.panes.read().await.get(&tab.active_pane) {
@@ -407,7 +453,7 @@ impl SessionState {
         (80, 24)
     }
 
-    async fn collect_space_info(&self) -> SpaceInfo {
+    pub async fn collect_space_info(&self) -> SpaceInfo {
         let tabs = self.tabs.read().await;
         let tab_order = self.tab_order.read().await;
         let active_tab = *self.active_tab.read().await;
@@ -457,6 +503,155 @@ impl SessionState {
             tabs: tab_infos,
             active_tab,
             panes: pane_infos,
+        }
+    }
+}
+
+/// Manages multiple spaces (sessions) with shared pane/tab ID counters.
+pub struct SpaceManager {
+    spaces: RwLock<HashMap<SpaceId, Arc<SessionState>>>,
+    space_order: RwLock<Vec<SpaceId>>,
+    active_space: RwLock<SpaceId>,
+    next_space_id: AtomicU32,
+    next_pane_id: Arc<AtomicU32>,
+    next_tab_id: Arc<AtomicU32>,
+    pub event_bus: broadcast::Sender<ServerEvent>,
+    shell: String,
+    cwd: String,
+}
+
+impl SpaceManager {
+    pub async fn new(
+        event_bus: broadcast::Sender<ServerEvent>,
+        shell: String,
+        cwd: String,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<Self> {
+        let next_space_id = AtomicU32::new(0);
+        let next_pane_id = Arc::new(AtomicU32::new(0));
+        let next_tab_id = Arc::new(AtomicU32::new(0));
+
+        let space_id = SpaceId(next_space_id.fetch_add(1, Ordering::Relaxed));
+        let space_name = generate_space_name(&[]);
+
+        let session = Arc::new(
+            SessionState::with_counters(
+                event_bus.clone(),
+                shell.clone(),
+                cwd.clone(),
+                cols,
+                rows,
+                space_id,
+                space_name,
+                Arc::clone(&next_pane_id),
+                Arc::clone(&next_tab_id),
+            )
+            .await?,
+        );
+
+        let mut spaces = HashMap::new();
+        spaces.insert(space_id, session);
+
+        Ok(Self {
+            spaces: RwLock::new(spaces),
+            space_order: RwLock::new(vec![space_id]),
+            active_space: RwLock::new(space_id),
+            next_space_id,
+            next_pane_id,
+            next_tab_id,
+            event_bus,
+            shell,
+            cwd,
+        })
+    }
+
+    pub async fn active_session(&self) -> Arc<SessionState> {
+        let active = *self.active_space.read().await;
+        let spaces = self.spaces.read().await;
+        spaces
+            .get(&active)
+            .expect("active space must exist")
+            .clone()
+    }
+
+    pub async fn create_space(&self, name: Option<String>) -> anyhow::Result<SpaceId> {
+        let space_id = SpaceId(self.next_space_id.fetch_add(1, Ordering::Relaxed));
+
+        let existing_names: Vec<String> = {
+            let spaces = self.spaces.read().await;
+            let order = self.space_order.read().await;
+            order
+                .iter()
+                .filter_map(|id| spaces.get(id))
+                .map(|s| s.space_name.clone())
+                .collect()
+        };
+        let name_refs: Vec<&str> = existing_names.iter().map(|s| s.as_str()).collect();
+        let space_name = name.unwrap_or_else(|| generate_space_name(&name_refs));
+
+        let session = Arc::new(
+            SessionState::with_counters(
+                self.event_bus.clone(),
+                self.shell.clone(),
+                self.cwd.clone(),
+                80,
+                24,
+                space_id,
+                space_name,
+                Arc::clone(&self.next_pane_id),
+                Arc::clone(&self.next_tab_id),
+            )
+            .await?,
+        );
+
+        let space_info = session.collect_space_info().await;
+
+        {
+            let mut spaces = self.spaces.write().await;
+            spaces.insert(space_id, session);
+        }
+        {
+            let mut order = self.space_order.write().await;
+            order.push(space_id);
+        }
+
+        let _ = self.event_bus.send(ServerEvent::SpaceCreated(space_info));
+
+        Ok(space_id)
+    }
+
+    pub async fn switch_space(&self, space_id: SpaceId) -> anyhow::Result<()> {
+        {
+            let spaces = self.spaces.read().await;
+            if !spaces.contains_key(&space_id) {
+                anyhow::bail!("space not found: {:?}", space_id);
+            }
+        }
+        {
+            let mut active = self.active_space.write().await;
+            *active = space_id;
+        }
+        let session = self.active_session().await;
+        let info = session.collect_space_info().await;
+        let _ = self.event_bus.send(ServerEvent::SpaceUpdated(info));
+        Ok(())
+    }
+
+    pub async fn collect_full_state(&self) -> FullState {
+        let active = *self.active_space.read().await;
+        let spaces = self.spaces.read().await;
+        let order = self.space_order.read().await;
+        let mut space_infos = Vec::new();
+        for id in order.iter() {
+            if let Some(session) = spaces.get(id) {
+                space_infos.push(session.collect_space_info().await);
+            }
+        }
+        FullState {
+            spaces: space_infos,
+            active_space: active,
+            agents: vec![],
         }
     }
 }

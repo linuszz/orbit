@@ -20,7 +20,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     let mut y = area.y;
     let x = area.x;
 
-    // Header row: "SPACES" + collapse hint «
+    // Header row: "SPACES" left-aligned + collapse hint «
     let header = format!(
         "{:<width$}\u{00AB}",
         "SPACES",
@@ -53,87 +53,37 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     );
     y += 1;
 
-    // Cards
+    // Cards — 3 rows each: name, cwd, stats; 1-row gap between cards
     for (i, space) in app.spaces.iter().enumerate() {
-        if y + 6 > area.y + area.height {
+        if y + 3 > area.y + area.height {
             break;
         }
 
         let is_active = i == app.active_space_idx;
         let is_hovered = app.sidebar_hovered == Some(i);
 
-        let card_bg = if is_active {
-            BG_CARD
-        } else if is_hovered {
-            BG_TERTIARY
-        } else {
-            BG_SECONDARY
-        };
-
-        let name_fg = if is_active { FG_PRIMARY } else { FG_SECONDARY };
-
-        // Top border row: ╭─ name ─╮ (or ▌─ name ─╮ for active)
-        let name_trunc = truncate(&space.name, w.saturating_sub(4) as usize);
-        let dashes_right = w.saturating_sub(5 + name_trunc.len() as u16);
-        let top_left = if is_active { "\u{258C}" } else { "\u{256D}" }; // ▌ or ╭
-        let accent_fg = if is_active { ACCENT } else { BORDER };
-        // Build the rest of the border after the first char: "─ name ─...─╮"
-        let rest_of_border = format!(
-            "\u{2500} {}{} \u{256E}",
+        // Name row
+        let name_trunc = truncate(&space.name, (w as usize).saturating_sub(1));
+        let name_text = format!(
+            " {:<width$}",
             name_trunc,
-            "\u{2500}".repeat(dashes_right as usize)
+            width = (w as usize).saturating_sub(1)
         );
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(top_left, Style::default().fg(accent_fg).bg(card_bg)),
-                Span::styled(rest_of_border, Style::default().fg(BORDER).bg(card_bg)),
-            ]))
-            .style(Style::default().bg(card_bg)),
-            Rect {
-                x,
-                y,
-                width: w,
-                height: 1,
-            },
-        );
-        // Overlay the name in the correct color
-        let name_x = x + 3; // after "▌─ " or "╭─ "
+        let (name_bg, name_fg, name_mod) = if is_active {
+            (ACCENT, BG_PRIMARY, Modifier::BOLD)
+        } else if is_hovered {
+            (ACCENT_HOVER, FG_PRIMARY, Modifier::empty())
+        } else {
+            (BG_SECONDARY, FG_SECONDARY, Modifier::empty())
+        };
         frame.render_widget(
             Paragraph::new(Span::styled(
-                name_trunc.clone(),
+                name_text,
                 Style::default()
                     .fg(name_fg)
-                    .bg(card_bg)
-                    .add_modifier(if is_active {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
+                    .bg(name_bg)
+                    .add_modifier(name_mod),
             )),
-            Rect {
-                x: name_x,
-                y,
-                width: w.saturating_sub(4),
-                height: 1,
-            },
-        );
-        y += 1;
-
-        // CWD row: │ ~/path    │
-        let cwd_trunc = truncate(&space.cwd, w.saturating_sub(4) as usize);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("\u{2502}", Style::default().fg(BORDER).bg(card_bg)),
-                Span::styled(
-                    format!(
-                        " {:<width$} ",
-                        cwd_trunc,
-                        width = w.saturating_sub(4) as usize
-                    ),
-                    Style::default().fg(FG_SECONDARY).bg(card_bg),
-                ),
-                Span::styled("\u{2502}", Style::default().fg(BORDER).bg(card_bg)),
-            ])),
             Rect {
                 x,
                 y,
@@ -143,48 +93,53 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         );
         y += 1;
 
-        // Stats row: │ ● N  Xt Yp │
+        // CWD row
+        let cwd_trunc = truncate(&space.cwd, (w as usize).saturating_sub(1));
+        let cwd_text = format!(
+            " {:<width$}",
+            cwd_trunc,
+            width = (w as usize).saturating_sub(1)
+        );
+        let (cwd_bg, cwd_fg) = if is_active {
+            (BG_CARD, FG_SECONDARY)
+        } else if is_hovered {
+            (BG_TERTIARY, FG_SECONDARY)
+        } else {
+            (BG_SECONDARY, FG_MUTED)
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                cwd_text,
+                Style::default().fg(cwd_fg).bg(cwd_bg),
+            )),
+            Rect {
+                x,
+                y,
+                width: w,
+                height: 1,
+            },
+        );
+        y += 1;
+
+        // Stats row
         let status_sym = if space.pane_count > 0 {
             "\u{25CF}"
         } else {
             "\u{25CB}"
         };
-        let stats = format!(
-            "{}   {}t {}p",
-            status_sym, space.tab_count, space.pane_count
-        );
-        let stats_trunc = truncate(&stats, w.saturating_sub(4) as usize);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("\u{2502}", Style::default().fg(BORDER).bg(card_bg)),
-                Span::styled(
-                    format!(
-                        " {:<width$} ",
-                        stats_trunc,
-                        width = w.saturating_sub(4) as usize
-                    ),
-                    Style::default().fg(FG_MUTED).bg(card_bg),
-                ),
-                Span::styled("\u{2502}", Style::default().fg(BORDER).bg(card_bg)),
-            ])),
-            Rect {
-                x,
-                y,
-                width: w,
-                height: 1,
-            },
-        );
-        y += 1;
-
-        // Bottom border: ╰──────────────╯
-        let bottom = format!(
-            "\u{2570}{}\u{256F}",
-            "\u{2500}".repeat(w.saturating_sub(2) as usize)
-        );
+        let stats_raw = format!(" {} {}t {}p", status_sym, space.tab_count, space.pane_count);
+        let stats_text = format!("{:<width$}", stats_raw, width = w as usize);
+        let (stats_bg, stats_fg) = if is_active {
+            (BG_CARD, FG_MUTED)
+        } else if is_hovered {
+            (BG_TERTIARY, FG_MUTED)
+        } else {
+            (BG_SECONDARY, FG_MUTED)
+        };
         frame.render_widget(
             Paragraph::new(Span::styled(
-                bottom,
-                Style::default().fg(BORDER).bg(card_bg),
+                stats_text,
+                Style::default().fg(stats_fg).bg(stats_bg),
             )),
             Rect {
                 x,
@@ -195,8 +150,8 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         );
         y += 1;
 
-        // Gap between cards
-        if i + 1 < app.spaces.len() {
+        // Gap row between cards (not after the last one)
+        if i + 1 < app.spaces.len() && y < area.y + area.height {
             frame.render_widget(
                 Paragraph::new("").style(Style::default().bg(BG_PRIMARY)),
                 Rect {
@@ -210,12 +165,29 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    // New space button at bottom if space allows
+    // [+] New Space button
     if y < area.y + area.height {
         frame.render_widget(
             Paragraph::new(Span::styled(
-                " [+] New ",
+                format!("{:<width$}", " [+] New Space", width = w as usize),
                 Style::default().fg(ACCENT).bg(BG_CARD),
+            )),
+            Rect {
+                x,
+                y,
+                width: w,
+                height: 1,
+            },
+        );
+        y += 1;
+    }
+
+    // Flight Deck button
+    if y < area.y + area.height {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                format!("{:<width$}", " \u{2261}  Flight Deck", width = w as usize),
+                Style::default().fg(FG_MUTED).bg(BG_CARD),
             )),
             Rect {
                 x,
@@ -231,9 +203,21 @@ fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {
     let w = area.width; // should be 2
     let x = area.x;
 
+    // Expand hint at top (row 0)
+    frame.render_widget(
+        Paragraph::new(Span::styled("\u{00BB}", Style::default().fg(FG_MUTED))),
+        Rect {
+            x,
+            y: area.y,
+            width: w,
+            height: 1,
+        },
+    );
+
+    // Space numbers starting at row 1
     for (i, _space) in app.spaces.iter().enumerate() {
-        let y = area.y + i as u16;
-        if y >= area.y + area.height.saturating_sub(1) {
+        let y = area.y + 1 + i as u16;
+        if y >= area.y + area.height {
             break;
         }
         let is_active = i == app.active_space_idx;
@@ -253,18 +237,6 @@ fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {
             },
         );
     }
-
-    // Expand hint at bottom
-    let expand_y = area.y + area.height.saturating_sub(1);
-    frame.render_widget(
-        Paragraph::new(Span::styled("\u{00BB}", Style::default().fg(FG_MUTED))),
-        Rect {
-            x,
-            y: expand_y,
-            width: w,
-            height: 1,
-        },
-    );
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {
@@ -272,7 +244,7 @@ fn truncate(s: &str, max_chars: usize) -> String {
         s.to_string()
     } else {
         let mut t: String = s.chars().take(max_chars.saturating_sub(1)).collect();
-        t.push('\u{2026}'); // horizontal ellipsis …
+        t.push('\u{2026}'); // horizontal ellipsis
         t
     }
 }

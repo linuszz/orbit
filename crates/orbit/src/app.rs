@@ -181,18 +181,17 @@ pub struct App {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum ContextMenuTarget {
     Pane(PaneId),
     Space,
     Sidebar,
+    Tab(TabId),
 }
 
 #[derive(Debug, Clone)]
 pub struct ContextMenu {
     pub x: u16,
     pub y: u16,
-    #[allow(dead_code)]
     pub target: ContextMenuTarget,
     pub items: Vec<ContextMenuItem>,
     pub selected: usize,
@@ -429,6 +428,19 @@ impl App {
                 shortcut: "".into(),
                 id: "new_space",
             }],
+            ContextMenuTarget::Tab(_tab_id) => vec![
+                ContextMenuItem::Action {
+                    label: "New Tab".into(),
+                    shortcut: "c".into(),
+                    id: "new_tab",
+                },
+                ContextMenuItem::Separator,
+                ContextMenuItem::Action {
+                    label: "Close Tab".into(),
+                    shortcut: "x".into(),
+                    id: "close_tab",
+                },
+            ],
         };
         self.context_menu = Some(ContextMenu {
             x,
@@ -582,6 +594,16 @@ impl App {
                 if self.tabs.is_empty() {
                     self.should_quit = true;
                 }
+                self.needs_redraw = true;
+            }
+            ServerEvent::SpaceCreated(info) => {
+                self.spaces.push(SpaceEntry {
+                    space_id: info.id,
+                    name: info.name.clone(),
+                    cwd: info.path.clone(),
+                    tab_count: info.tabs.len(),
+                    pane_count: info.panes.len(),
+                });
                 self.needs_redraw = true;
             }
             ServerEvent::SpaceClosed(_) => {
