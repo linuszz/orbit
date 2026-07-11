@@ -572,6 +572,25 @@ security-sensitive code, performance-critical decisions, regex patterns,
 bincode API footguns, `#[cfg(unix)]` gating. Self-documenting code first,
 comment second. NO emoji in any string or comment.
 
+### 9.9 Async lock scoping (deadlock prevention)
+
+`tokio::sync::RwLock` does **not** support recursive or read-after-write
+locking from the same task. Holding a `write()` guard across an `await`
+that internally calls `read()` on the **same** lock will self-deadlock.
+
+Pattern to use:
+
+```rust
+{
+    let mut active = self.active_tab.write().await;
+    *active = new_id;
+} // drop write guard here before any await
+let info = self.collect_space_info().await; // may read active_tab
+```
+
+Scope write guards as tightly as possible, especially before calling
+`collect_space_info()` or any other helper that may read the same state.
+
 ---
 
 ## 10. Configuration
@@ -677,11 +696,11 @@ Address them in Phase 1 week 1; do NOT let them drift.
 | GAP | Status | Action |
 |---|---|---|
 | **GAP 1**: workspace deps complete | ✅ Done in skeleton | All deps declared in `Cargo.toml [workspace.dependencies]` |
-| **GAP 2**: test strategy | ⚠ Open | Add VT golden-file tests (from `vte`/`alacritty_terminal` fixtures), `proptest` for CellGrid invariants, IPC roundtrip tests, protocol-version compat tests. First PR must include the test framework scaffold. |
+| **GAP 2**: test strategy | ⚠ Open | First IPC roundtrip test added (`pane_input_roundtrip` in `orbit-protocol::encoding`). Still need: VT golden-file tests (from `vte`/`alacritty_terminal` fixtures), `proptest` for CellGrid invariants, protocol-version compat tests. |
 | **GAP 3**: daemon lifecycle | ⚠ Open | Add signal handling (SIGTERM/SIGINT → graceful PTY shutdown → unlink socket), PID/lock file at `$XDG_RUNTIME_DIR/orbit.lock`, `prctl(PR_SET_PDEATHSIG)` for PTY children. Doc 04 needs a new §8. |
 | **GAP 4**: error layering | ✅ Done in skeleton | `thiserror` in `orbit-protocol`/`orbit-core`; `anyhow` in `orbit`/`orbitd` mains. Verify on each new error site. |
 | **GAP 5**: CI scaffold | ✅ Done in skeleton | `.github/workflows/ci.yml` + `rust-toolchain.toml`. |
-| **GAP 6**: Vertical Slice 0 | ⚠ Open | Define as the first-week goal: orbitd binds socket → orbit connects + Hello/Welcome handshake → orbitd creates 1 PTY (`/bin/bash`) → keyboard → PaneInput → PTY → output → VtParser → CellGrid → PaneOutput → render → Ctrl+B x closes pane → orbit disconnects → orbitd keeps session. |
+| **GAP 6**: Vertical Slice 0 | ✅ Done | Phase 1 Mercury vertical slice is complete: orbitd binds socket, orbit connects via Hello/Welcome, PTY lifecycle, keyboard → PaneInput → PTY, output → VtParser → CellGrid → PaneOutput → render, close pane, and detach-reattach all work. Server-side tabs (new/switch/close) are implemented and survive client reconnect. |
 | **GAP 7**: README frame-rate wording | ✅ Done in skeleton | README and code say "按需重绘" / "redraw-on-demand". |
 
 ### Other consistency items resolved at skeleton time
@@ -692,6 +711,7 @@ Address them in Phase 1 week 1; do NOT let them drift.
 - ✅ Prefix key default Ctrl+B (not direct shortcuts like `Ctrl+Shift+S`)
 - ✅ Code uses generic terms (Space/Pane/Agent); brand terms in CLI/UI strings only
 - ✅ `09-TUI高质量设计稿-更新版.md` is canonical over the older `09-TUI高质量设计稿.md`
+- ✅ Server-side tabs implemented: TabId/TabInfo, new/switch/close handlers, and tab state survives client detach/reconnect
 
 ---
 
