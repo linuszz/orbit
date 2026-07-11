@@ -1,89 +1,69 @@
-use ratatui::{
-    layout::Rect,
-    style::{Modifier, Style},
-    text::{Line, Span},
-    Frame,
-};
+use ratatui::{layout::Rect, Frame};
 
-use crate::app::{App, InputMode};
-use crate::tui::theme::*;
+use crate::app::App;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let bg = Block::default()
-        .style(Style::default().bg(BG_SECONDARY).fg(FG_MUTED))
-        .borders(ratatui::widgets::Borders::BOTTOM)
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Paragraph};
+
+    use crate::tui::theme::*;
+
+    // Bottom border on the bar
+    let bar_block = Block::default()
+        .borders(Borders::BOTTOM)
         .border_style(Style::default().fg(BORDER));
-    frame.render_widget(bg, area);
+    let inner = bar_block.inner(area);
+    frame.render_widget(bar_block, area);
 
-    let tab_width = area.width.saturating_sub(14) as usize;
-    let mut spans: Vec<Span> = vec![Span::raw(" ")];
+    let mut spans: Vec<Span> = Vec::new();
 
-    let mut used = 1usize;
     for (i, tab) in app.tabs.iter().enumerate() {
-        if used >= tab_width {
-            break;
-        }
-        let is_active = i == app.active_tab;
-        let label = if is_active {
-            format!(" {}* ", tab.name)
+        let label = format!(" {} ", tab.name);
+        let (bg, fg, mods) = if tab.id == app.active_tab_id {
+            (ACCENT, BG_PRIMARY, Modifier::BOLD)
+        } else if app.tab_hovered == Some(i) {
+            (ACCENT_HOVER, FG_PRIMARY, Modifier::empty())
         } else {
-            format!(" {} ", tab.name)
+            (BG_CARD, FG_MUTED, Modifier::empty())
         };
-        let (style, underline) = if is_active {
-            (
-                Style::default()
-                    .fg(FG_PRIMARY)
-                    .bg(BG_TERTIARY)
-                    .add_modifier(Modifier::BOLD),
-                true,
-            )
-        } else {
-            (Style::default().fg(FG_MUTED), false)
-        };
-        if underline {
-            spans.push(Span::styled(
-                label.clone(),
-                style.add_modifier(Modifier::UNDERLINED),
-            ));
-        } else {
-            spans.push(Span::styled(label, style));
-        }
-        used += tab.name.len() + 3;
-    }
-
-    spans.push(Span::styled(" + ", Style::default().fg(ACCENT)));
-
-    let remaining = area.width.saturating_sub(used as u16 + 8);
-    if remaining > 0 {
-        spans.push(Span::raw(" ".repeat(remaining as usize)));
-    }
-
-    let agent_color = if app.agent_panel_visible {
-        ACCENT
-    } else {
-        FG_MUTED
-    };
-    spans.push(Span::styled("[A]", Style::default().fg(agent_color)));
-    spans.push(Span::raw(" "));
-    spans.push(Span::styled(
-        "Agents",
-        Style::default().fg(if app.agent_panel_visible {
-            ACCENT
-        } else {
-            FG_MUTED
-        }),
-    ));
-
-    if matches!(app.mode, InputMode::CommandPalette { .. }) {
-        spans.push(Span::raw("  "));
         spans.push(Span::styled(
-            "[FLIGHT DECK]",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            label,
+            Style::default().fg(fg).bg(bg).add_modifier(mods),
         ));
     }
 
-    let line = Line::from(spans);
-    frame.render_widget(line, area);
-}
+    // New tab button
+    let new_tab_bg = if app.tab_hovered == Some(app.tabs.len()) {
+        ACCENT
+    } else {
+        BG_CARD
+    };
+    spans.push(Span::styled(
+        " + ",
+        Style::default().fg(FG_MUTED).bg(new_tab_bg),
+    ));
 
-use ratatui::widgets::Block;
+    // Fill remaining space with BG_SECONDARY
+    let used_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum::<u16>();
+    let agent_badge_w: u16 = if app.agent_panel_visible { 14 } else { 12 };
+    let fill_len = inner.width.saturating_sub(used_width + agent_badge_w) as usize;
+    spans.push(Span::styled(
+        " ".repeat(fill_len),
+        Style::default().bg(BG_SECONDARY),
+    ));
+
+    // Agent panel toggle — right-aligned
+    let (agent_fg, agent_bg) = if app.agent_panel_visible {
+        (BG_PRIMARY, ACCENT)
+    } else {
+        (FG_MUTED, BG_CARD)
+    };
+    spans.push(Span::styled(
+        " [A] Satellites ",
+        Style::default().fg(agent_fg).bg(agent_bg),
+    ));
+
+    let line = Line::from(spans);
+    frame.render_widget(Paragraph::new(line), inner);
+}

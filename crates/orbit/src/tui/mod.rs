@@ -50,9 +50,9 @@ pub fn term_color(c: &TermColor) -> Color {
     }
 }
 
-const SIDEBAR_W: u16 = 14;
-const SIDEBAR_COLLAPSED_W: u16 = 2;
-const AGENT_W: u16 = 22;
+pub const SIDEBAR_W: u16 = 14;
+pub const SIDEBAR_COLLAPSED_W: u16 = 2;
+pub const AGENT_W: u16 = 22;
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();

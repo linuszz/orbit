@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::app::{App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
 use crate::ipc::{IpcClient, IpcWriter};
-use crate::tui::{render, OrbitTerminal};
+use crate::tui::{render, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
 
 fn is_prefix_key(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b')
@@ -476,7 +476,32 @@ async fn handle_mouse(
                 }
             }
 
-            if app.sidebar_visible && mouse.column < sidebar_w {
+            // Sidebar: collapse button («) at (sidebar_w-1, 0)
+            if mouse.column == SIDEBAR_W - 1 && mouse.row == 0 && app.sidebar_visible {
+                app.sidebar_visible = false;
+                app.needs_redraw = true;
+                return;
+            }
+            // Sidebar: expand button (») when collapsed
+            if !app.sidebar_visible && mouse.column < SIDEBAR_COLLAPSED_W && mouse.row > 0 {
+                app.sidebar_visible = true;
+                app.needs_redraw = true;
+                return;
+            }
+            // Sidebar: click a space card
+            if app.sidebar_visible && mouse.column < SIDEBAR_W {
+                // Cards start at row 2 (after header + divider). Each card is 5 rows + 1 gap = 6 rows.
+                let content_row = mouse.row.saturating_sub(2);
+                let card_idx = (content_row / 6) as usize;
+                if card_idx < app.spaces.len() {
+                    let space_id = app.spaces[card_idx].space_id;
+                    app.active_space_idx = card_idx;
+                    let _ = writer
+                        .send(orbit_protocol::ClientMessage::SwitchSpace { space_id })
+                        .await;
+                    app.needs_redraw = true;
+                    return;
+                }
                 return;
             }
 
@@ -551,6 +576,58 @@ async fn handle_mouse(
                 if *offset == 0 {
                     app.mode = InputMode::Normal;
                 }
+                app.needs_redraw = true;
+            }
+        }
+        MouseEventKind::Moved => {
+            // Tab bar hover (row 0 of the frame, after the sidebar).
+            let sb_w = if app.sidebar_visible {
+                SIDEBAR_W
+            } else {
+                SIDEBAR_COLLAPSED_W
+            };
+            if mouse.row == 0 && mouse.column >= sb_w {
+                let col = mouse.column - sb_w;
+                let mut acc: u16 = 0;
+                let mut hovered = None;
+                for (i, tab) in app.tabs.iter().enumerate() {
+                    let w = tab.name.len() as u16 + 2; // " name "
+                    if col < acc + w {
+                        hovered = Some(i);
+                        break;
+                    }
+                    acc += w;
+                }
+                // Check new-tab button
+                if hovered.is_none() && col < acc + 3 {
+                    hovered = Some(app.tabs.len());
+                }
+                if app.tab_hovered != hovered {
+                    app.tab_hovered = hovered;
+                    app.needs_redraw = true;
+                }
+            } else if app.tab_hovered.is_some() {
+                app.tab_hovered = None;
+                app.needs_redraw = true;
+            }
+
+            // Sidebar card hover
+            if app.sidebar_visible && mouse.column < SIDEBAR_W {
+                // Each card is 5 rows tall (top_border+cwd+stats+bottom) + 1 gap = 6 rows.
+                // Cards start after header (2 rows: "SPACES«" + divider).
+                let content_row = mouse.row.saturating_sub(2);
+                let card_idx = (content_row / 6) as usize;
+                let hovered = if card_idx < app.spaces.len() {
+                    Some(card_idx)
+                } else {
+                    None
+                };
+                if app.sidebar_hovered != hovered {
+                    app.sidebar_hovered = hovered;
+                    app.needs_redraw = true;
+                }
+            } else if app.sidebar_hovered.is_some() {
+                app.sidebar_hovered = None;
                 app.needs_redraw = true;
             }
         }
