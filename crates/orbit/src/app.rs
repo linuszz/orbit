@@ -342,6 +342,8 @@ impl App {
             AgentStatus::Idle => 3,
             AgentStatus::Done => 4,
         });
+        // Card visual positions shift after sorting; stale CardBtn hover is wrong.
+        self.agent_hovered = None;
     }
 
     pub fn pane_tree(&self) -> &PaneLayout {
@@ -660,6 +662,10 @@ impl App {
                 self.needs_redraw = true;
             }
             ServerEvent::AgentRemoved(id) => {
+                // Dismiss Eclipse modal if it belongs to this agent.
+                if self.eclipse_modal.as_ref().map(|m| m.agent_id) == Some(*id) {
+                    self.eclipse_modal = None;
+                }
                 self.agents.retain(|a| a.id != *id);
                 if let Some(AgentHover::CardBtn { card_idx, .. }) = &self.agent_hovered {
                     if *card_idx >= self.agents.len() {
