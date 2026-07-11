@@ -57,12 +57,20 @@ pub const AGENT_W: u16 = 22;
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    let sidebar_w = if app.sidebar_visible {
+    // §6.7: Compact (<80 cols) — sidebar collapsed to icon-only width.
+    let sidebar_w = if area.width < 80 {
+        SIDEBAR_COLLAPSED_W
+    } else if app.sidebar_visible {
         SIDEBAR_W
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = if app.agent_panel_visible { AGENT_W } else { 0 };
+    // §6.7: Compact (<80 cols) — agent panel hidden regardless of toggle state.
+    let agent_w = if app.agent_panel_visible && area.width >= 80 {
+        AGENT_W
+    } else {
+        0
+    };
 
     let cols = ratatui::layout::Layout::horizontal([
         ratatui::layout::Constraint::Length(sidebar_w),
@@ -147,7 +155,8 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         ("  x", "close current pane"),
         ("  d", "detach (quit, keep session)"),
         ("  b", "toggle sidebar"),
-        ("  a", "toggle agent monitor"),
+        ("  a", "toggle satellite monitor"),
+        ("  j / k", "scroll satellite monitor down / up"),
         ("  ?", "this help"),
         ("Tab", "cycle focus between panes"),
         ("Scroll: k/j/PgUp/PgDn/g/G/q", ""),

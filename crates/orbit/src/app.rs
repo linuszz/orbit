@@ -381,6 +381,7 @@ impl App {
 
     /// Sort agents: Blocked first, then Working, then Error, then Idle/Done.
     pub fn sort_agents(&mut self) {
+        let order_before: Vec<AgentId> = self.agents.iter().map(|a| a.id).collect();
         self.agents.sort_by_key(|a| match a.status {
             AgentStatus::Blocked => 0u8,
             AgentStatus::Working => 1,
@@ -388,8 +389,11 @@ impl App {
             AgentStatus::Idle => 3,
             AgentStatus::Done => 4,
         });
-        // Card visual positions shift after sorting; stale CardBtn hover is wrong.
-        self.agent_hovered = None;
+        // Only reset hover if card positions actually changed; avoids 5-second hover flicker.
+        let order_after: Vec<AgentId> = self.agents.iter().map(|a| a.id).collect();
+        if order_before != order_after {
+            self.agent_hovered = None;
+        }
     }
 
     /// True when the animation tick timer should be active.
