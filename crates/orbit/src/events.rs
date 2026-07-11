@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::app::{AgentHover, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
 use crate::ipc::{IpcClient, IpcWriter};
-use crate::tui::{render, OrbitTerminal, AGENT_W, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
+use crate::tui::{agent_panel_width, render, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
 
 fn is_prefix_key(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b')
@@ -66,11 +66,7 @@ fn content_area(term_size: ratatui::layout::Rect, app: &App) -> ratatui::layout:
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = if app.agent_panel_visible && term_size.width >= 80 {
-        AGENT_W
-    } else {
-        0
-    };
+    let agent_w = agent_panel_width(term_size.width, app.agent_panel_visible);
     ratatui::layout::Rect {
         x: sidebar_w,
         y: 1, // below tab bar
@@ -783,11 +779,7 @@ async fn handle_mouse(
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = if app.agent_panel_visible && term_size.width >= 80 {
-        AGENT_W
-    } else {
-        0
-    };
+    let agent_w = agent_panel_width(term_size.width, app.agent_panel_visible);
     let term_w = term_size.width;
     let term_h = term_size.height;
 
@@ -897,12 +889,9 @@ async fn handle_mouse(
                 return;
             }
 
-            // Agent panel clicks (hidden in compact mode <80 cols)
-            if app.agent_panel_visible
-                && term_w >= 80
-                && mouse.column >= term_w.saturating_sub(AGENT_W)
-            {
-                let panel_x = term_w.saturating_sub(AGENT_W);
+            // Agent panel clicks
+            if agent_w > 0 && mouse.column >= term_w.saturating_sub(agent_w) {
+                let panel_x = term_w.saturating_sub(agent_w);
                 let inner_x = panel_x + 1;
                 let col_in_inner = mouse.column.saturating_sub(inner_x);
 
@@ -1247,8 +1236,7 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollUp => {
-            let agent_visible = app.agent_panel_visible && term_w >= 80;
-            if agent_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
+            if agent_w > 0 && mouse.column >= term_w.saturating_sub(agent_w) {
                 app.agent_scroll_offset = app.agent_scroll_offset.saturating_sub(1);
                 app.needs_redraw = true;
             } else if let InputMode::Scroll { offset } = &mut app.mode {
@@ -1257,8 +1245,7 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollDown => {
-            let agent_visible = app.agent_panel_visible && term_w >= 80;
-            if agent_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
+            if agent_w > 0 && mouse.column >= term_w.saturating_sub(agent_w) {
                 let max_scroll = app.agents.len().saturating_sub(1);
                 app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max_scroll);
                 app.needs_redraw = true;
@@ -1321,12 +1308,9 @@ async fn handle_mouse(
                 app.needs_redraw = true;
             }
 
-            // Agent panel hover (only when not in compact mode)
-            if app.agent_panel_visible
-                && term_w >= 80
-                && mouse.column >= term_w.saturating_sub(AGENT_W)
-            {
-                let panel_x = term_w.saturating_sub(AGENT_W);
+            // Agent panel hover
+            if agent_w > 0 && mouse.column >= term_w.saturating_sub(agent_w) {
+                let panel_x = term_w.saturating_sub(agent_w);
                 let inner_x = panel_x + 1;
                 let col_in_inner = mouse.column.saturating_sub(inner_x);
                 let any_blocked = app

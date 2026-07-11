@@ -52,7 +52,18 @@ pub fn term_color(c: &TermColor) -> Color {
 
 pub const SIDEBAR_W: u16 = 20;
 pub const SIDEBAR_COLLAPSED_W: u16 = 2;
-pub const AGENT_W: u16 = 22;
+
+/// §6.7 responsive agent panel width:
+///   Ultra ≥140 → 25 cols, Wide/Standard 80-139 → 20 cols, Compact <80 → 0.
+pub fn agent_panel_width(term_w: u16, visible: bool) -> u16 {
+    if !visible || term_w < 80 {
+        0
+    } else if term_w >= 140 {
+        25
+    } else {
+        20
+    }
+}
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -65,12 +76,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    // §6.7: Compact (<80 cols) — agent panel hidden regardless of toggle state.
-    let agent_w = if app.agent_panel_visible && area.width >= 80 {
-        AGENT_W
-    } else {
-        0
-    };
+    let agent_w = agent_panel_width(area.width, app.agent_panel_visible);
 
     let cols = ratatui::layout::Layout::horizontal([
         ratatui::layout::Constraint::Length(sidebar_w),
