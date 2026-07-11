@@ -128,8 +128,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("[{}]", n)
         };
+        // Badge pulses fast when blocked, matching Eclipse banner and card icons.
         let badge_color = if any_blocked {
-            ACCENT_BLOCKED
+            if (app.tick_count / 15) % 2 == 0 {
+                ACCENT_BLOCKED
+            } else {
+                ratatui::style::Color::Rgb(100, 85, 0)
+            }
         } else {
             FG_MUTED
         };
@@ -208,16 +213,25 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("{} agents", blocked_agents.len())
         };
-        let banner_text = format!(
+        // Fast-pulse the ◎ icon at ~30-tick half-period (~480 ms), matching Blocked card icons.
+        let icon_color = if (app.tick_count / 15) % 2 == 0 {
+            ACCENT_BLOCKED
+        } else {
+            ratatui::style::Color::Rgb(100, 85, 0)
+        };
+        let text_part = format!(
             "{:<width$}",
-            format!("\u{25CE} Eclipse: {}", name_part),
-            width = iw as usize
+            format!(" Eclipse: {}", name_part),
+            width = iw.saturating_sub(1) as usize
         );
         frame.render_widget(
-            Paragraph::new(Span::styled(
-                banner_text,
-                Style::default().fg(ACCENT_BLOCKED).bg(BG_TERTIARY),
-            )),
+            Paragraph::new(Line::from(vec![
+                Span::styled("\u{25CE}", Style::default().fg(icon_color).bg(BG_TERTIARY)),
+                Span::styled(
+                    text_part,
+                    Style::default().fg(ACCENT_BLOCKED).bg(BG_TERTIARY),
+                ),
+            ])),
             Rect {
                 x: ix,
                 y,
