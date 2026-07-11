@@ -722,7 +722,7 @@ async fn handle_eclipse_modal_mouse(
 
     // Compute modal geometry (mirrors eclipse_modal widget).
     let modal_w = 64u16.min(term_size.width.saturating_sub(4));
-    let modal_h = 16u16.min(term_size.height.saturating_sub(4));
+    let modal_h = 18u16.min(term_size.height.saturating_sub(4));
     let modal_x = (term_size.width.saturating_sub(modal_w)) / 2;
     let modal_y = (term_size.height.saturating_sub(modal_h)) / 2;
     let inner_x = modal_x + 1;
@@ -738,12 +738,11 @@ async fn handle_eclipse_modal_mouse(
         return;
     }
 
-    // Buttons render at modal_y+13 when modal_h>=14, or modal_y+12 when modal_h==13.
-    // When modal_h<13 the buttons are outside the modal boundary and not rendered.
-    if modal_h < 13 {
+    // Buttons are at modal_y + modal_h - 2 (second-to-last row, inside bottom border).
+    if modal_h < 15 {
         return;
     }
-    let btn_row = modal_y + modal_h.min(14) - 1;
+    let btn_row = modal_y + modal_h.saturating_sub(2);
     if mouse.row != btn_row {
         return;
     }

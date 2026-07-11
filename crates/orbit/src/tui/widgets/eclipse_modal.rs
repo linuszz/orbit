@@ -26,7 +26,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let modal_w = 64u16.min(area.width.saturating_sub(4));
-    let modal_h = 16u16.min(area.height.saturating_sub(4));
+    let modal_h = 18u16.min(area.height.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(modal_w)) / 2;
     let y = area.y + (area.height.saturating_sub(modal_h)) / 2;
     let modal_area = Rect {
@@ -95,6 +95,76 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     row += 1;
 
     // Blank row
+    row += 1;
+
+    // Agent context row 1: model | task (truncated).
+    if row < modal_area.y + modal_area.height.saturating_sub(4) {
+        let model_part = if modal.model.is_empty() {
+            String::new()
+        } else {
+            format!(" Model: {}", truncate_str(&modal.model, 20))
+        };
+        let task_part = modal
+            .task
+            .as_deref()
+            .map(|t| format!("  Task: {}", truncate_str(t, 20)))
+            .unwrap_or_default();
+        let ctx1 = truncate_str(&format!("{}{}", model_part, task_part), inner_w as usize);
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                format!("{:<width$}", ctx1, width = inner_w as usize),
+                Style::default().fg(FG_MUTED),
+            )),
+            Rect {
+                x: inner_x,
+                y: row,
+                width: inner_w,
+                height: 1,
+            },
+        );
+        row += 1;
+    }
+
+    // Agent context row 2: cwd | progress bar | blocked duration.
+    if row < modal_area.y + modal_area.height.saturating_sub(4) {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(ref cwd) = modal.cwd {
+            parts.push(format!(" Dir: {}", truncate_str(cwd, 14)));
+        }
+        if let Some(pct) = modal.progress {
+            let bar_w = 6usize;
+            let filled = (pct.clamp(0.0, 1.0) * bar_w as f32) as usize;
+            let bar = "\u{2588}".repeat(filled) + &"\u{2591}".repeat(bar_w - filled);
+            parts.push(format!("  {} {:3.0}%", bar, pct * 100.0));
+        }
+        if modal.blocked_duration_s > 0 {
+            let secs = modal.blocked_duration_s;
+            let dur = if secs < 60 {
+                format!("{secs}s")
+            } else if secs < 3600 {
+                format!("{}m{}s", secs / 60, secs % 60)
+            } else {
+                format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+            };
+            parts.push(format!("  Blocked: {}", dur));
+        }
+        let ctx2 = truncate_str(&parts.concat(), inner_w as usize);
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                format!("{:<width$}", ctx2, width = inner_w as usize),
+                Style::default().fg(FG_MUTED),
+            )),
+            Rect {
+                x: inner_x,
+                y: row,
+                width: inner_w,
+                height: 1,
+            },
+        );
+        row += 1;
+    }
+
+    // Blank row before last message
     row += 1;
 
     // "Last message:" label
@@ -255,11 +325,29 @@ pub fn open(state: &mut crate::app::App, agent_id: orbit_protocol::AgentId) {
             .as_ref()
             .and_then(|d| d.block_msg.clone())
             .unwrap_or_default();
+        let task = agent.detail.as_ref().and_then(|d| d.task.clone());
+        let progress = agent.detail.as_ref().and_then(|d| d.progress);
+        let blocked_duration_s = agent.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
+        let cwd = state
+            .spaces
+            .iter()
+            .find(|s| s.space_id == agent.space_id)
+            .and_then(|s| {
+                std::path::Path::new(&s.cwd)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| format!("~/{}", s))
+            });
         state.eclipse_modal = Some(EclipseModalState {
             agent_id,
             agent_name: agent.name.clone(),
             block_msg,
             response: String::new(),
+            model: agent.model.clone(),
+            task,
+            progress,
+            cwd,
+            blocked_duration_s,
         });
         state.needs_redraw = true;
     }

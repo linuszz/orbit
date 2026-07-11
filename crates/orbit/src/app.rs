@@ -48,6 +48,13 @@ pub struct EclipseModalState {
     pub agent_name: String,
     pub block_msg: String,
     pub response: String,
+    /// Snapshot of agent context captured at modal open time.
+    pub model: String,
+    pub task: Option<String>,
+    pub progress: Option<f32>,
+    pub cwd: Option<String>,
+    /// Wall-clock seconds since agent was blocked (captured at open time).
+    pub blocked_duration_s: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

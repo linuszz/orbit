@@ -352,11 +352,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             render_card(frame, ix, y, iw, agent, card_idx, app, metrics);
             y += 5;
             if card_idx + 1 < visible_agents.len() && y < area.y + area.height {
+                // Blank separator row between cards (per design spec §5.1).
                 frame.render_widget(
-                    Line::from(Span::styled(
-                        "\u{2500}".repeat(iw as usize),
-                        Style::default().fg(BORDER),
-                    )),
+                    Paragraph::new("").style(Style::default().bg(BG_SECONDARY)),
                     Rect {
                         x: ix,
                         y,
