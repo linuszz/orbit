@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use orbit_core::VtParser;
 use orbit_protocol::{
-    Cell, CellGrid, FullState, PaneId, PaneLayout, ServerEvent, SpaceId, SplitDir, TabId,
+    AgentInfo, Cell, CellGrid, FullState, PaneId, PaneLayout, ServerEvent, SpaceId, SplitDir, TabId,
 };
 
 // Fields consumed by Task 4 (sidebar rendering); suppressing dead_code until then.
@@ -156,6 +156,14 @@ pub struct Tab {
     pub pane_tree: PaneLayout,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentHover {
+    HeaderAdd,
+    HeaderClose,
+    EclipseRespond,
+    CardBtn { card_idx: usize, slot: u8 },
+}
+
 pub struct App {
     pub panes: HashMap<PaneId, PaneState>,
     pub tabs: Vec<Tab>,
@@ -179,6 +187,8 @@ pub struct App {
     pub sidebar_hovered: Option<usize>,
     pub sidebar_toggle_hovered: bool,
     pub selection: Option<Selection>,
+    pub agents: Vec<AgentInfo>,
+    pub agent_hovered: Option<AgentHover>,
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +314,8 @@ impl App {
             sidebar_hovered: None,
             sidebar_toggle_hovered: false,
             selection: None,
+            agents: state.agents.clone(),
+            agent_hovered: None,
         }
     }
 
@@ -517,6 +529,7 @@ impl App {
                     .iter()
                     .position(|s| s.id == state.active_space)
                     .unwrap_or(0);
+                self.agents = state.agents.clone();
                 self.needs_redraw = true;
             }
             ServerEvent::PaneOutput { pane_id, data } => {
@@ -612,6 +625,33 @@ impl App {
             }
             ServerEvent::SpaceClosed(_) => {
                 self.should_quit = true;
+                self.needs_redraw = true;
+            }
+            ServerEvent::AgentCreated(info) => {
+                self.agents.push(info.clone());
+                self.needs_redraw = true;
+            }
+            ServerEvent::AgentRemoved(id) => {
+                self.agents.retain(|a| a.id != *id);
+                if let Some(AgentHover::CardBtn { card_idx, .. }) = &self.agent_hovered {
+                    if *card_idx >= self.agents.len() {
+                        self.agent_hovered = None;
+                    }
+                }
+                self.needs_redraw = true;
+            }
+            ServerEvent::AgentStatusChanged {
+                agent_id,
+                new_status,
+                detail,
+            } => {
+                if let Some(agent) = self.agents.iter_mut().find(|a| a.id == *agent_id) {
+                    agent.status = new_status.clone();
+                    agent.detail = detail.clone();
+                }
+                self.needs_redraw = true;
+            }
+            ServerEvent::AgentMetricsUpdated { .. } => {
                 self.needs_redraw = true;
             }
             _ => {}

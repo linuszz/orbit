@@ -6,7 +6,7 @@ use futures::StreamExt;
 use orbit_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
 
-use crate::app::{App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
+use crate::app::{AgentHover, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
 use crate::ipc::{IpcClient, IpcWriter};
 use crate::tui::{render, OrbitTerminal, AGENT_W, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
 
@@ -615,6 +615,107 @@ async fn handle_mouse(
                 return;
             }
 
+            // Agent panel clicks
+            if app.agent_panel_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
+                let panel_x = term_w.saturating_sub(AGENT_W);
+                let inner_x = panel_x + 1;
+                let col_in_inner = mouse.column.saturating_sub(inner_x);
+
+                // Header row (row 0): [+] and × buttons
+                if mouse.row == 0 {
+                    if mouse.column == term_w.saturating_sub(1) {
+                        // × close button
+                        app.agent_panel_visible = false;
+                        app.needs_redraw = true;
+                        return;
+                    }
+                    if mouse.column >= term_w.saturating_sub(4)
+                        && mouse.column <= term_w.saturating_sub(2)
+                    {
+                        // [+] add — placeholder
+                        app.needs_redraw = true;
+                        return;
+                    }
+                }
+
+                // Eclipse banner [Respond] (row 3 of panel when blocked)
+                let any_blocked = app
+                    .agents
+                    .iter()
+                    .any(|a| a.status == orbit_protocol::AgentStatus::Blocked);
+                if any_blocked && mouse.row == 3 && (1..=9).contains(&col_in_inner) {
+                    // [Respond] — placeholder
+                    app.needs_redraw = true;
+                    return;
+                }
+
+                // Card button clicks
+                let base_row =
+                    crate::tui::widgets::agent_monitor::card_start_row(0, any_blocked, 0);
+                let mut card_row_start = base_row;
+                for agent in app.agents.iter() {
+                    let btn_row = card_row_start + 4;
+                    if mouse.row == btn_row {
+                        // Button row of this card
+                        let slot = if (1..=6).contains(&col_in_inner) {
+                            Some(0u8)
+                        } else if (8..=13).contains(&col_in_inner) {
+                            Some(1)
+                        } else if (15..=20).contains(&col_in_inner) {
+                            Some(2)
+                        } else {
+                            None
+                        };
+                        if let Some(s) = slot {
+                            let agent_id = agent.id;
+                            let agent_pane = agent.pane_id;
+                            let agent_status = agent.status.clone();
+                            match (s, &agent_status) {
+                                // Slot 0: [View] — focus agent's pane
+                                (0, _) => {
+                                    if let Some(pane_id) = agent_pane {
+                                        app.active_pane = pane_id;
+                                        let _ = writer
+                                            .send(ClientMessage::FocusPane {
+                                                tab_id: app.active_tab_id,
+                                                pane_id,
+                                            })
+                                            .await;
+                                    }
+                                }
+                                // Slot 1: [Stop] (Working) or [Abrt] (Blocked)
+                                (1, orbit_protocol::AgentStatus::Working)
+                                | (2, orbit_protocol::AgentStatus::Blocked) => {
+                                    let _ =
+                                        writer.send(ClientMessage::AgentAbort { agent_id }).await;
+                                }
+                                _ => {}
+                            }
+                        }
+                        app.needs_redraw = true;
+                        return;
+                    }
+                    if mouse.row >= card_row_start && mouse.row < card_row_start + 5 {
+                        // Click on card body (not buttons) — focus pane
+                        let agent_pane = agent.pane_id;
+                        if let Some(pane_id) = agent_pane {
+                            app.active_pane = pane_id;
+                            let _ = writer
+                                .send(ClientMessage::FocusPane {
+                                    tab_id: app.active_tab_id,
+                                    pane_id,
+                                })
+                                .await;
+                        }
+                        app.needs_redraw = true;
+                        return;
+                    }
+                    card_row_start += 6;
+                }
+                app.needs_redraw = true;
+                return;
+            }
+
             let pane_area = content_area(term_size, app);
             let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
             for (pid, rect) in &areas {
@@ -807,6 +908,66 @@ async fn handle_mouse(
                 }
             } else if app.tab_hovered.is_some() {
                 app.tab_hovered = None;
+                app.needs_redraw = true;
+            }
+
+            // Agent panel hover
+            if app.agent_panel_visible && mouse.column >= term_w.saturating_sub(AGENT_W) {
+                let panel_x = term_w.saturating_sub(AGENT_W);
+                let inner_x = panel_x + 1;
+                let col_in_inner = mouse.column.saturating_sub(inner_x);
+                let any_blocked = app
+                    .agents
+                    .iter()
+                    .any(|a| a.status == orbit_protocol::AgentStatus::Blocked);
+
+                let new_hover = if mouse.row == 0 {
+                    if mouse.column == term_w.saturating_sub(1) {
+                        Some(AgentHover::HeaderClose)
+                    } else if (term_w.saturating_sub(4)..=term_w.saturating_sub(2))
+                        .contains(&mouse.column)
+                    {
+                        Some(AgentHover::HeaderAdd)
+                    } else {
+                        None
+                    }
+                } else if any_blocked && mouse.row == 3 && (1..=9).contains(&col_in_inner) {
+                    Some(AgentHover::EclipseRespond)
+                } else {
+                    let base_row =
+                        crate::tui::widgets::agent_monitor::card_start_row(0, any_blocked, 0);
+                    let mut card_row_start = base_row;
+                    let mut found = None;
+                    for (card_idx, _) in app.agents.iter().enumerate() {
+                        if mouse.row >= card_row_start && mouse.row < card_row_start + 5 {
+                            let card_row = mouse.row - card_row_start;
+                            if card_row == 4 {
+                                let slot = if (1..=6).contains(&col_in_inner) {
+                                    Some(0u8)
+                                } else if (8..=13).contains(&col_in_inner) {
+                                    Some(1)
+                                } else if (15..=20).contains(&col_in_inner) {
+                                    Some(2)
+                                } else {
+                                    None
+                                };
+                                if let Some(s) = slot {
+                                    found = Some(AgentHover::CardBtn { card_idx, slot: s });
+                                }
+                            }
+                            break;
+                        }
+                        card_row_start += 6;
+                    }
+                    found
+                };
+
+                if app.agent_hovered != new_hover {
+                    app.agent_hovered = new_hover;
+                    app.needs_redraw = true;
+                }
+            } else if app.agent_hovered.is_some() {
+                app.agent_hovered = None;
                 app.needs_redraw = true;
             }
 
