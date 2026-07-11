@@ -21,16 +21,20 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     let x = area.x;
 
     // Header row: "SPACES" left-aligned + collapse hint «
-    let header = format!(
-        "{:<width$}\u{00AB}",
-        "SPACES",
-        width = w.saturating_sub(1) as usize
-    );
+    let collapse_fg = if app.sidebar_toggle_hovered {
+        ACCENT
+    } else {
+        FG_MUTED
+    };
+    let spaces_label = format!("{:<width$}", "SPACES", width = w.saturating_sub(1) as usize);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            header,
-            Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
-        ))),
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                spaces_label,
+                Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("\u{00AB}", Style::default().fg(collapse_fg)),
+        ])),
         Rect {
             x,
             y,
@@ -216,8 +220,13 @@ fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {
     let x = area.x;
 
     // Expand hint at top (row 0)
+    let expand_fg = if app.sidebar_toggle_hovered {
+        ACCENT
+    } else {
+        FG_MUTED
+    };
     frame.render_widget(
-        Paragraph::new(Span::styled("\u{00BB}", Style::default().fg(FG_MUTED))),
+        Paragraph::new(Span::styled("\u{00BB}", Style::default().fg(expand_fg))),
         Rect {
             x,
             y: area.y,

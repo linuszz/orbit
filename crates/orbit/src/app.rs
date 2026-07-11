@@ -177,6 +177,7 @@ pub struct App {
     pub active_space_idx: usize,
     pub tab_hovered: Option<usize>,
     pub sidebar_hovered: Option<usize>,
+    pub sidebar_toggle_hovered: bool,
     pub selection: Option<Selection>,
 }
 
@@ -301,6 +302,7 @@ impl App {
             active_space_idx,
             tab_hovered: None,
             sidebar_hovered: None,
+            sidebar_toggle_hovered: false,
             selection: None,
         }
     }
@@ -465,10 +467,11 @@ impl App {
                         if let Some(existing) = self.panes.get_mut(&pane.id) {
                             existing.sync_from_server(&pane.cell_grid);
                         } else {
-                            let ps = PaneState::new(
+                            let mut ps = PaneState::new(
                                 pane.cell_grid.cols.max(1),
                                 pane.cell_grid.rows.max(1),
                             );
+                            ps.sync_from_server(&pane.cell_grid);
                             self.panes.insert(pane.id, ps);
                         }
                     }
@@ -541,8 +544,9 @@ impl App {
                             existing.sync_from_server(&pane.cell_grid);
                         }
                     } else {
-                        let ps =
+                        let mut ps =
                             PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
+                        ps.sync_from_server(&pane.cell_grid);
                         self.panes.insert(pane.id, ps);
 
                         if let Some((target, dir)) = self.pending_split.take() {

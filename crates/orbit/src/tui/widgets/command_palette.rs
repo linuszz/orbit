@@ -40,8 +40,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             height: palette_h,
         };
 
+        // Dim only the non-sidebar area so the active space card remains readable
+        let sb_w = if app.sidebar_visible {
+            crate::tui::SIDEBAR_W
+        } else {
+            crate::tui::SIDEBAR_COLLAPSED_W
+        };
+        let dim_area = Rect {
+            x: area.x + sb_w,
+            y: area.y,
+            width: area.width.saturating_sub(sb_w),
+            height: area.height,
+        };
         let dim = Block::default().style(Style::default().bg(Color::Rgb(10, 10, 14)));
-        frame.render_widget(dim, area);
+        frame.render_widget(dim, dim_area);
 
         frame.render_widget(Clear, palette_area);
 

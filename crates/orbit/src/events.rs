@@ -763,6 +763,17 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Moved => {
+            // Sidebar toggle button hover (« collapse or » expand)
+            let toggle_hovered = if app.sidebar_visible {
+                mouse.row == 0 && mouse.column == SIDEBAR_W - 1
+            } else {
+                mouse.row == 0 && mouse.column < SIDEBAR_COLLAPSED_W
+            };
+            if app.sidebar_toggle_hovered != toggle_hovered {
+                app.sidebar_toggle_hovered = toggle_hovered;
+                app.needs_redraw = true;
+            }
+
             // Tab bar hover (row 0 of the frame, after the sidebar).
             let sb_w = if app.sidebar_visible {
                 SIDEBAR_W
