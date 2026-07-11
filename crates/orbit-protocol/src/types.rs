@@ -3,6 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TabId(pub u32);
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SpaceId(pub u32);
 
@@ -118,9 +121,9 @@ pub struct SpaceInfo {
     pub id: SpaceId,
     pub name: String,
     pub path: String,
+    pub tabs: Vec<TabInfo>,
+    pub active_tab: TabId,
     pub panes: Vec<PaneInfo>,
-    pub active_pane: PaneId,
-    pub layout: PaneLayout,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,9 +193,18 @@ impl PaneLayout {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneInfo {
     pub id: PaneId,
+    pub tab_id: TabId,
     pub title: String,
     pub cwd: String,
     pub cell_grid: CellGrid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabInfo {
+    pub id: TabId,
+    pub name: String,
+    pub layout: PaneLayout,
+    pub active_pane: PaneId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

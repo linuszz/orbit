@@ -66,13 +66,16 @@ pub async fn handle_client(mut stream: Stream, session: Arc<SessionState>) -> Re
             msg = read_msg(&mut stream) => {
                 let msg = match msg { Ok(m) => m, Err(e) => { debug!("client read: {e:#}"); break; } };
                 match msg {
-                    ClientMessage::PaneInput { pane_id, data } => session.send_input(pane_id, data).await,
-                    ClientMessage::ClosePane { pane_id } => session.close_pane(pane_id).await,
-                    ClientMessage::SplitPane { direction, .. } => {
-                        if let Err(e) = session.split_pane(direction).await { tracing::warn!("split: {e:#}"); }
+                    ClientMessage::PaneInput { tab_id, pane_id, data } => session.send_input(tab_id, pane_id, data).await,
+                    ClientMessage::ClosePane { tab_id, pane_id } => session.close_pane(tab_id, pane_id).await,
+                    ClientMessage::SplitPane { tab_id, direction, .. } => {
+                        if let Err(e) = session.split_pane(tab_id, direction).await { tracing::warn!("split: {e:#}"); }
                     }
-                    ClientMessage::ResizePane { pane_id, cols, rows } => session.resize_pane(pane_id, cols, rows).await,
-                    ClientMessage::FocusPane { pane_id } => session.focus_pane(pane_id).await,
+                    ClientMessage::ResizePane { tab_id, pane_id, cols, rows } => session.resize_pane(tab_id, pane_id, cols, rows).await,
+                    ClientMessage::FocusPane { tab_id, pane_id } => session.focus_pane(tab_id, pane_id).await,
+                    ClientMessage::NewTab { name } => { session.new_tab(name).await; }
+                    ClientMessage::CloseTab { tab_id } => session.close_tab(tab_id).await,
+                    ClientMessage::SwitchTab { tab_id } => session.switch_tab(tab_id).await,
                     ClientMessage::RequestFullState => {
                         let s = session.collect_full_state().await;
                         let _ = write_msg(&mut stream, &ServerEvent::Welcome {

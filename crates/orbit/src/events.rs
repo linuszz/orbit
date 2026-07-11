@@ -63,6 +63,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
             app.pending_split = Some((app.active_pane, SplitDir::Horizontal));
             let _ = writer
                 .send(ClientMessage::SplitPane {
+                    tab_id: app.active_tab_id,
                     pane_id: app.active_pane,
                     direction: SplitDir::Horizontal,
                 })
@@ -72,6 +73,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
             app.pending_split = Some((app.active_pane, SplitDir::Vertical));
             let _ = writer
                 .send(ClientMessage::SplitPane {
+                    tab_id: app.active_tab_id,
                     pane_id: app.active_pane,
                     direction: SplitDir::Vertical,
                 })
@@ -83,6 +85,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
             }
             let _ = writer
                 .send(ClientMessage::ClosePane {
+                    tab_id: app.active_tab_id,
                     pane_id: app.active_pane,
                 })
                 .await;
@@ -91,13 +94,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
             app.mode = InputMode::Scroll { offset: 1 };
         }
         "new_tab" => {
-            app.pending_new_tab = true;
-            let _ = writer
-                .send(ClientMessage::SplitPane {
-                    pane_id: app.active_pane,
-                    direction: SplitDir::Horizontal,
-                })
-                .await;
+            let _ = writer.send(ClientMessage::NewTab { name: None }).await;
         }
         "next_tab" => app.next_tab(),
         "prev_tab" => app.prev_tab(),
@@ -107,6 +104,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
         "help" => app.show_help = true,
         _ => {}
     }
+
     app.needs_redraw = true;
 }
 
@@ -116,6 +114,7 @@ async fn execute_context_action(id: &str, app: &mut App, writer: &IpcWriter) {
             app.pending_split = Some((app.active_pane, SplitDir::Horizontal));
             let _ = writer
                 .send(ClientMessage::SplitPane {
+                    tab_id: app.active_tab_id,
                     pane_id: app.active_pane,
                     direction: SplitDir::Horizontal,
                 })
@@ -125,6 +124,7 @@ async fn execute_context_action(id: &str, app: &mut App, writer: &IpcWriter) {
             app.pending_split = Some((app.active_pane, SplitDir::Vertical));
             let _ = writer
                 .send(ClientMessage::SplitPane {
+                    tab_id: app.active_tab_id,
                     pane_id: app.active_pane,
                     direction: SplitDir::Vertical,
                 })
@@ -136,6 +136,7 @@ async fn execute_context_action(id: &str, app: &mut App, writer: &IpcWriter) {
             }
             let _ = writer
                 .send(ClientMessage::ClosePane {
+                    tab_id: app.active_tab_id,
                     pane_id: app.active_pane,
                 })
                 .await;
@@ -173,6 +174,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 app.cycle_focus();
                 let _ = writer
                     .send(ClientMessage::FocusPane {
+                        tab_id: app.active_tab_id,
                         pane_id: app.active_pane,
                     })
                     .await;
@@ -181,6 +183,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
             if let Some(bytes) = key_to_pty_bytes(&key) {
                 let _ = writer
                     .send(ClientMessage::PaneInput {
+                        tab_id: app.active_tab_id,
                         pane_id: app.active_pane,
                         data: bytes,
                     })
@@ -334,6 +337,7 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                             }
                             let _ = writer
                                 .send(ClientMessage::ResizePane {
+                                    tab_id: app.active_tab_id,
                                     pane_id: pid,
                                     cols: pc,
                                     rows: pr,
@@ -444,6 +448,7 @@ async fn handle_mouse(
                         app.pending_new_tab = true;
                         let _ = writer
                             .send(ClientMessage::SplitPane {
+                                tab_id: app.active_tab_id,
                                 pane_id: app.active_pane,
                                 direction: SplitDir::Horizontal,
                             })
@@ -483,7 +488,10 @@ async fn handle_mouse(
                 {
                     app.active_pane = *pid;
                     let _ = writer
-                        .send(ClientMessage::FocusPane { pane_id: *pid })
+                        .send(ClientMessage::FocusPane {
+                            tab_id: app.active_tab_id,
+                            pane_id: *pid,
+                        })
                         .await;
                     app.needs_redraw = true;
                     return;

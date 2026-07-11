@@ -17,6 +17,6 @@ pub use error::ProtocolError;
 pub use messages::{Capabilities, ClientMessage, ServerEvent, PROTOCOL_VERSION};
 pub use types::{
     AgentDetail, AgentId, AgentInfo, AgentLaunchRequest, AgentMetrics, AgentStatus, Cell,
-    CellFlags, CellGrid, FullState, ImageId, PaneId, PaneInfo, PaneLayout, ScrollbackLine, SpaceId,
-    SpaceInfo, SplitDir, TermColor,
+    CellFlags, CellGrid, FullState, ImageId, PaneId, PaneInfo, PaneLayout, ScrollbackLine,
+    SpaceId, SpaceInfo, SplitDir, TabId, TabInfo, TermColor,
 };

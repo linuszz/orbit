@@ -35,22 +35,37 @@ pub enum ClientMessage {
     },
 
     SplitPane {
+        tab_id: crate::TabId,
         pane_id: crate::PaneId,
         direction: crate::SplitDir,
     },
     ClosePane {
+        tab_id: crate::TabId,
         pane_id: crate::PaneId,
     },
     ResizePane {
+        tab_id: crate::TabId,
         pane_id: crate::PaneId,
         cols: u16,
         rows: u16,
     },
     FocusPane {
+        tab_id: crate::TabId,
         pane_id: crate::PaneId,
     },
 
+    NewTab {
+        name: Option<String>,
+    },
+    CloseTab {
+        tab_id: crate::TabId,
+    },
+    SwitchTab {
+        tab_id: crate::TabId,
+    },
+
     PaneInput {
+        tab_id: crate::TabId,
         pane_id: crate::PaneId,
         data: Vec<u8>,
     },

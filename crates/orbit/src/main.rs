@@ -51,6 +51,7 @@ async fn main() -> Result<()> {
         }
         let _ = ipc
             .send(&ClientMessage::ResizePane {
+                tab_id: app.active_tab_id,
                 pane_id: pid,
                 cols: pc,
                 rows: pr,
