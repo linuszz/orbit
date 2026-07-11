@@ -8,7 +8,9 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use orbit_protocol::{AgentDetail, AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
+use orbit_protocol::{
+    AgentDetail, AgentId, AgentInfo, AgentMetrics, AgentStatus, PaneId, ServerEvent, SpaceId,
+};
 use tokio::sync::{broadcast, RwLock};
 use tracing::debug;
 
@@ -281,9 +283,9 @@ impl AgentRegistry {
                             }
                         }
 
-                        // Every 10 polls (~5 s): emit duration updates.
+                        // Every 10 polls (~5 s): emit duration updates and resource metrics.
                         if poll_count % 10 == 0 {
-                            for (agent_id, start) in tracked.values() {
+                            for (cpid, (agent_id, start)) in &tracked {
                                 let duration_s = start.elapsed().as_secs() as u32;
                                 let (current_status, current_detail) = {
                                     let mut agents = self.agents.write().await;
@@ -301,6 +303,19 @@ impl AgentRegistry {
                                     new_status: current_status,
                                     detail: Some(current_detail),
                                 });
+
+                                #[cfg(target_os = "linux")]
+                                {
+                                    let rss_kb = read_rss_kb(*cpid);
+                                    let _ = self.event_bus.send(ServerEvent::AgentMetricsUpdated {
+                                        agent_id: *agent_id,
+                                        metrics: AgentMetrics {
+                                            cpu_percent: None,
+                                            rss_kb,
+                                            recent_lines: vec![],
+                                        },
+                                    });
+                                }
                             }
                         }
                     }
@@ -415,6 +430,21 @@ fn read_cmdline(pid: u32) -> Option<String> {
 
 #[cfg(not(target_os = "linux"))]
 fn read_cmdline(_pid: u32) -> Option<String> {
+    None
+}
+
+/// Read the resident set size (VmRSS) for a process from /proc/<pid>/status.
+#[cfg(target_os = "linux")]
+fn read_rss_kb(pid: u32) -> Option<u32> {
+    let content = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            return rest
+                .split_whitespace()
+                .next()
+                .and_then(|s| s.parse::<u32>().ok());
+        }
+    }
     None
 }
 

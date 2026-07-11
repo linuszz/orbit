@@ -2,8 +2,8 @@ use std::collections::{HashMap, VecDeque};
 
 use orbit_core::VtParser;
 use orbit_protocol::{
-    AgentId, AgentInfo, AgentStatus, Cell, CellGrid, FullState, PaneId, PaneLayout, ServerEvent,
-    SpaceId, SplitDir, TabId,
+    AgentId, AgentInfo, AgentMetrics, AgentStatus, Cell, CellGrid, FullState, PaneId, PaneLayout,
+    ServerEvent, SpaceId, SplitDir, TabId,
 };
 
 // Fields consumed by Task 4 (sidebar rendering); suppressing dead_code until then.
@@ -211,6 +211,7 @@ pub struct App {
     pub sidebar_toggle_hovered: bool,
     pub selection: Option<Selection>,
     pub agents: Vec<AgentInfo>,
+    pub agent_metrics: HashMap<AgentId, AgentMetrics>,
     pub agent_hovered: Option<AgentHover>,
     pub agent_scroll_offset: usize,
     pub eclipse_modal: Option<EclipseModalState>,
@@ -343,6 +344,7 @@ impl App {
             sidebar_toggle_hovered: false,
             selection: None,
             agents: state.agents.clone(),
+            agent_metrics: HashMap::new(),
             agent_hovered: None,
             agent_scroll_offset: 0,
             eclipse_modal: None,
@@ -691,6 +693,7 @@ impl App {
                 if self.eclipse_modal.as_ref().map(|m| m.agent_id) == Some(*id) {
                     self.eclipse_modal = None;
                 }
+                self.agent_metrics.remove(id);
                 self.agents.retain(|a| a.id != *id);
                 if let Some(AgentHover::CardBtn { card_idx, .. }) = &self.agent_hovered {
                     if *card_idx >= self.agents.len() {
@@ -714,7 +717,8 @@ impl App {
                 self.sort_agents();
                 self.needs_redraw = true;
             }
-            ServerEvent::AgentMetricsUpdated { .. } => {
+            ServerEvent::AgentMetricsUpdated { agent_id, metrics } => {
+                self.agent_metrics.insert(*agent_id, metrics.clone());
                 self.needs_redraw = true;
             }
             _ => {}

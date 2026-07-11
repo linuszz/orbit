@@ -1,4 +1,4 @@
-use orbit_protocol::{AgentInfo, AgentStatus};
+use orbit_protocol::{AgentInfo, AgentMetrics, AgentStatus};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -80,6 +80,16 @@ fn truncate_str(s: &str, max: usize) -> String {
         let mut t: String = s.chars().take(max.saturating_sub(1)).collect();
         t.push('\u{2026}');
         t
+    }
+}
+
+fn format_rss(rss_kb: u32) -> String {
+    if rss_kb < 1024 {
+        format!("{rss_kb}k")
+    } else if rss_kb < 1024 * 1024 {
+        format!("{}M", rss_kb / 1024)
+    } else {
+        format!("{}G", rss_kb / 1024 / 1024)
     }
 }
 
@@ -281,7 +291,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 }
                 break;
             }
-            render_card(frame, ix, y, iw, agent, card_idx, app);
+            let metrics = app.agent_metrics.get(&agent.id);
+            render_card(frame, ix, y, iw, agent, card_idx, app, metrics);
             y += 5;
             if card_idx + 1 < visible_agents.len() && y < area.y + area.height {
                 frame.render_widget(
@@ -310,6 +321,7 @@ fn render_card(
     agent: &AgentInfo,
     card_idx: usize,
     app: &App,
+    metrics: Option<&AgentMetrics>,
 ) {
     let sc = animated_status_color(&agent.status, app.tick_count);
     let icon = status_icon(&agent.status);
@@ -341,7 +353,7 @@ fn render_card(
         );
     }
 
-    // Row 1: " " + model (left) + duration (right-aligned) — total w cols
+    // Row 1: " " + model (left) + [rss] + duration (right-aligned) — total w cols
     {
         let duration_s = agent.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
         let dur_str = if duration_s > 0 {
@@ -349,18 +361,27 @@ fn render_card(
         } else {
             String::new()
         };
+        let rss_str = metrics.and_then(|m| m.rss_kb).map(format_rss);
         let inner_w = w.saturating_sub(1) as usize; // 1 leading space
-        let model_max = if dur_str.is_empty() {
+
+        // right = "[rss ]dur" or just "dur"
+        let right = match (&rss_str, dur_str.is_empty()) {
+            (Some(rss), false) => format!("{} {}", rss, dur_str),
+            (Some(rss), true) => rss.clone(),
+            (None, false) => dur_str.clone(),
+            (None, true) => String::new(),
+        };
+        let model_max = if right.is_empty() {
             inner_w
         } else {
-            inner_w.saturating_sub(dur_str.len() + 1) // space before duration
+            inner_w.saturating_sub(right.len() + 1) // 1 space before right
         };
         let model = truncate_str(&agent.model, model_max);
-        let model_text = if dur_str.is_empty() {
+        let model_text = if right.is_empty() {
             format!(" {:<width$}", model, width = inner_w)
         } else {
-            let pad = inner_w.saturating_sub(model.len() + dur_str.len());
-            format!(" {}{}{}", model, " ".repeat(pad), dur_str)
+            let pad = inner_w.saturating_sub(model.len() + right.len());
+            format!(" {}{}{}", model, " ".repeat(pad), right)
         };
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
