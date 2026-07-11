@@ -506,6 +506,7 @@ async fn handle_mouse(
                     for (i, tab) in app.tabs.iter().enumerate() {
                         let label_len = tab.name.len() as u16 + 2;
                         if mouse.column >= x && mouse.column < x + label_len {
+                            app.selection = None;
                             app.active_tab = i;
                             if let Some(&first) = app.pane_tree().leaves().first() {
                                 app.active_pane = first;

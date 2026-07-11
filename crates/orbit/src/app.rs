@@ -329,6 +329,7 @@ impl App {
 
     pub fn next_tab(&mut self) {
         if self.tabs.len() > 1 {
+            self.selection = None;
             self.active_tab = (self.active_tab + 1) % self.tabs.len();
             self.active_tab_id = self.tabs[self.active_tab].id;
             let leaves = self.pane_tree().leaves();
@@ -341,6 +342,7 @@ impl App {
 
     pub fn prev_tab(&mut self) {
         if self.tabs.len() > 1 {
+            self.selection = None;
             self.active_tab = (self.active_tab + self.tabs.len() - 1) % self.tabs.len();
             self.active_tab_id = self.tabs[self.active_tab].id;
             let leaves = self.pane_tree().leaves();
