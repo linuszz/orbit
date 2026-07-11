@@ -131,7 +131,20 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
                 .await;
         }
         "toggle_sidebar" => app.sidebar_visible = !app.sidebar_visible,
-        "toggle_agent" => app.agent_panel_visible = !app.agent_panel_visible,
+        "toggle_agent" => {
+            app.agent_panel_visible = !app.agent_panel_visible;
+            if app.agent_panel_visible {
+                // Enter keyboard nav mode when opening panel.
+                let sel = if let InputMode::AgentPanel { selected } = app.mode {
+                    selected
+                } else {
+                    0
+                };
+                app.mode = InputMode::AgentPanel { selected: sel };
+            } else {
+                app.mode = InputMode::Normal;
+            }
+        }
         "agent_scroll_up" => {
             if app.agent_panel_visible {
                 app.agent_scroll_offset = app.agent_scroll_offset.saturating_sub(1);
@@ -426,6 +439,59 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 }
                 KeyCode::Char('G') => *offset = 0,
                 KeyCode::Char('g') => *offset = max_offset,
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    app.mode = InputMode::Normal;
+                }
+                _ => {}
+            }
+            app.needs_redraw = true;
+        }
+        InputMode::AgentPanel { selected } => {
+            let n = app.agents.len();
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if n > 0 {
+                        *selected = selected.saturating_sub(1);
+                        // Auto-scroll so selected card is visible.
+                        app.agent_scroll_offset = app.agent_scroll_offset.min(*selected);
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if n > 0 {
+                        *selected = (*selected + 1).min(n - 1);
+                        // Auto-scroll: keep selected within view (rough: 1 card per slot).
+                        if *selected >= app.agent_scroll_offset + 3 {
+                            app.agent_scroll_offset = selected.saturating_sub(2);
+                        }
+                    }
+                }
+                KeyCode::Tab => {
+                    if n > 0 {
+                        *selected = (*selected + 1) % n;
+                    }
+                }
+                KeyCode::Enter => {
+                    let sel = *selected;
+                    if let Some(agent) = app.agents.get(sel) {
+                        if let Some(pane_id) = agent.pane_id {
+                            let found = app
+                                .tabs
+                                .iter()
+                                .enumerate()
+                                .find(|(_, t)| t.pane_tree.leaves().contains(&pane_id));
+                            let tab_id = found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
+                            let tab_idx = found.map(|(i, _)| i).unwrap_or(app.active_tab);
+                            app.active_pane = pane_id;
+                            app.active_tab = tab_idx;
+                            app.active_tab_id = tab_id;
+                            app.selection = None;
+                            app.mode = InputMode::Normal;
+                            let _ = writer
+                                .send(ClientMessage::FocusPane { tab_id, pane_id })
+                                .await;
+                        }
+                    }
+                }
                 KeyCode::Char('q') | KeyCode::Esc => {
                     app.mode = InputMode::Normal;
                 }
@@ -827,8 +893,16 @@ async fn handle_mouse(
                     let sats_start = term_w.saturating_sub(agent_w + 16);
                     if mouse.column >= sats_start && mouse.column < term_w.saturating_sub(agent_w) {
                         app.agent_panel_visible = !app.agent_panel_visible;
-                        if !app.agent_panel_visible {
+                        if app.agent_panel_visible {
+                            let sel = if let InputMode::AgentPanel { selected } = app.mode {
+                                selected
+                            } else {
+                                0
+                            };
+                            app.mode = InputMode::AgentPanel { selected: sel };
+                        } else {
                             app.agent_hovered = None;
+                            app.mode = InputMode::Normal;
                         }
                         app.needs_redraw = true;
                         return;
@@ -900,6 +974,7 @@ async fn handle_mouse(
                     if mouse.column == term_w.saturating_sub(1) {
                         // × close button
                         app.agent_panel_visible = false;
+                        app.mode = InputMode::Normal;
                         app.needs_redraw = true;
                         return;
                     }

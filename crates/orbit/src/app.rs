@@ -61,6 +61,10 @@ pub enum InputMode {
     Scroll {
         offset: usize,
     },
+    /// Keyboard navigation mode for the Satellites panel (prefix+a).
+    AgentPanel {
+        selected: usize,
+    },
 }
 
 pub struct CommandDef {

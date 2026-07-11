@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AgentHover, App};
+use crate::app::{AgentHover, App, InputMode};
 use crate::tui::theme::*;
 
 fn status_icon(status: &AgentStatus) -> &'static str {
@@ -356,6 +356,14 @@ fn render_card(
     let icon = status_icon(&agent.status);
     let label = status_label(&agent.status);
 
+    // Keyboard selection: card is highlighted when AgentPanel nav mode targets it.
+    let is_selected = if let InputMode::AgentPanel { selected } = &app.mode {
+        *selected == card_idx + app.agent_scroll_offset
+    } else {
+        false
+    };
+    let card_bg = if is_selected { BG_CARD } else { BG_SECONDARY };
+
     // Row 0: icon + " " + name (11 cols) + " " + status (7 cols) = 21
     {
         let name_w = (w.saturating_sub(2 + 1 + 7)) as usize; // icon+sp + sp + status
@@ -364,14 +372,17 @@ fn render_card(
         let status_padded = format!("{:>7}", label);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(icon, Style::default().fg(sc)),
-                Span::raw(" "),
+                Span::styled(icon, Style::default().fg(sc).bg(card_bg)),
+                Span::styled(" ", Style::default().bg(card_bg)),
                 Span::styled(
                     name_padded,
-                    Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(FG_PRIMARY)
+                        .bg(card_bg)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(" "),
-                Span::styled(status_padded, Style::default().fg(sc)),
+                Span::styled(" ", Style::default().bg(card_bg)),
+                Span::styled(status_padded, Style::default().fg(sc).bg(card_bg)),
             ])),
             Rect {
                 x,
@@ -439,7 +450,7 @@ fn render_card(
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 model_text,
-                Style::default().fg(FG_MUTED),
+                Style::default().fg(FG_MUTED).bg(card_bg),
             )])),
             Rect {
                 x,
@@ -474,7 +485,10 @@ fn render_card(
         let task = truncate_str(task_str, w.saturating_sub(1) as usize);
         let task_text = format!(" {:<width$}", task, width = w.saturating_sub(1) as usize);
         frame.render_widget(
-            Paragraph::new(Span::styled(task_text, Style::default().fg(FG_SECONDARY))),
+            Paragraph::new(Span::styled(
+                task_text,
+                Style::default().fg(FG_SECONDARY).bg(card_bg),
+            )),
             Rect {
                 x,
                 y: y + 2,
@@ -519,9 +533,9 @@ fn render_card(
             };
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(bar, Style::default().fg(sc)),
-                    Span::styled(suffix, Style::default().fg(FG_MUTED)),
+                    Span::styled(" ", Style::default().bg(card_bg)),
+                    Span::styled(bar, Style::default().fg(sc).bg(card_bg)),
+                    Span::styled(suffix, Style::default().fg(FG_MUTED).bg(card_bg)),
                 ])),
                 Rect {
                     x,
@@ -532,7 +546,7 @@ fn render_card(
             );
         } else {
             frame.render_widget(
-                Paragraph::new("").style(Style::default().bg(BG_SECONDARY)),
+                Paragraph::new("").style(Style::default().bg(card_bg)),
                 Rect {
                     x,
                     y: y + 3,
@@ -546,10 +560,10 @@ fn render_card(
     // Row 4: " " + [Btn1] + " " + [Btn2] + " " + [Btn3] = 1+6+1+6+1+6 = 21
     {
         let buttons = card_buttons(&agent.status);
-        let mut spans = vec![Span::raw(" ")];
+        let mut spans = vec![Span::styled(" ", Style::default().bg(card_bg))];
         for (slot, (btn_label, is_danger)) in buttons.iter().enumerate() {
             if slot > 0 {
-                spans.push(Span::raw(" "));
+                spans.push(Span::styled(" ", Style::default().bg(card_bg)));
             }
             let hovered = app.agent_hovered
                 == Some(AgentHover::CardBtn {
@@ -566,9 +580,9 @@ fn render_card(
                     },
                 )
             } else if *is_danger {
-                (ACCENT_ERROR, BG_SECONDARY)
+                (ACCENT_ERROR, card_bg)
             } else {
-                (FG_MUTED, BG_SECONDARY)
+                (FG_MUTED, card_bg)
             };
             spans.push(Span::styled(*btn_label, Style::default().fg(fg).bg(bg)));
         }

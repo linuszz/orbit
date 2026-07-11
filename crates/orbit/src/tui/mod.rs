@@ -54,14 +54,15 @@ pub const SIDEBAR_W: u16 = 20;
 pub const SIDEBAR_COLLAPSED_W: u16 = 2;
 
 /// §6.7 responsive agent panel width:
-///   Ultra ≥140 → 25 cols, Wide/Standard 80-139 → 20 cols, Compact <80 → 0.
+///   Ultra ≥140 → 25 cols, Wide/Standard 80-139 → 22 cols, Compact <80 → 0.
+///   22 is the minimum needed for the 3-button row (1+6+1+6+1+6 = 21 inner chars).
 pub fn agent_panel_width(term_w: u16, visible: bool) -> u16 {
     if !visible || term_w < 80 {
         0
     } else if term_w >= 140 {
         25
     } else {
-        20
+        22
     }
 }
 

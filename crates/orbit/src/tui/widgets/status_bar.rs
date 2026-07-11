@@ -40,6 +40,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
     }
 
+    if matches!(app.mode, InputMode::AgentPanel { .. }) {
+        spans.push(Span::styled(
+            " SATELLITE NAV ",
+            Style::default()
+                .fg(BG_PRIMARY)
+                .bg(ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            " \u{2191}\u{2193}:nav Enter:view q:exit",
+            Style::default().fg(FG_MUTED),
+        ));
+        spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
+    }
+
     spans.push(Span::styled(
         "[SPACE] ",
         Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
