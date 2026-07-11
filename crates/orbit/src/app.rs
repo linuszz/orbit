@@ -2,7 +2,8 @@ use std::collections::{HashMap, VecDeque};
 
 use orbit_core::VtParser;
 use orbit_protocol::{
-    AgentInfo, Cell, CellGrid, FullState, PaneId, PaneLayout, ServerEvent, SpaceId, SplitDir, TabId,
+    AgentId, AgentInfo, AgentStatus, Cell, CellGrid, FullState, PaneId, PaneLayout, ServerEvent,
+    SpaceId, SplitDir, TabId,
 };
 
 // Fields consumed by Task 4 (sidebar rendering); suppressing dead_code until then.
@@ -24,6 +25,15 @@ pub struct Selection {
     pub start: (u16, u16), // (col, row) in cell coords within pane
     pub end: (u16, u16),
     pub active: bool,
+}
+
+/// State for the Satellite Eclipse intervention modal.
+#[derive(Debug, Clone)]
+pub struct EclipseModalState {
+    pub agent_id: AgentId,
+    pub agent_name: String,
+    pub block_msg: String,
+    pub response: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +199,7 @@ pub struct App {
     pub selection: Option<Selection>,
     pub agents: Vec<AgentInfo>,
     pub agent_hovered: Option<AgentHover>,
+    pub eclipse_modal: Option<EclipseModalState>,
 }
 
 #[derive(Debug, Clone)]
@@ -316,7 +327,19 @@ impl App {
             selection: None,
             agents: state.agents.clone(),
             agent_hovered: None,
+            eclipse_modal: None,
         }
+    }
+
+    /// Sort agents: Blocked first, then Working, then Error, then Idle/Done.
+    pub fn sort_agents(&mut self) {
+        self.agents.sort_by_key(|a| match a.status {
+            AgentStatus::Blocked => 0u8,
+            AgentStatus::Working => 1,
+            AgentStatus::Error => 2,
+            AgentStatus::Idle => 3,
+            AgentStatus::Done => 4,
+        });
     }
 
     pub fn pane_tree(&self) -> &PaneLayout {
@@ -530,6 +553,7 @@ impl App {
                     .position(|s| s.id == state.active_space)
                     .unwrap_or(0);
                 self.agents = state.agents.clone();
+                self.sort_agents();
                 self.needs_redraw = true;
             }
             ServerEvent::PaneOutput { pane_id, data } => {
@@ -629,6 +653,7 @@ impl App {
             }
             ServerEvent::AgentCreated(info) => {
                 self.agents.push(info.clone());
+                self.sort_agents();
                 self.agent_panel_visible = true;
                 self.needs_redraw = true;
             }
@@ -650,6 +675,7 @@ impl App {
                     agent.status = new_status.clone();
                     agent.detail = detail.clone();
                 }
+                self.sort_agents();
                 self.needs_redraw = true;
             }
             ServerEvent::AgentMetricsUpdated { .. } => {

@@ -231,7 +231,52 @@ async fn execute_context_action(
     app.needs_redraw = true;
 }
 
+async fn handle_eclipse_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
+    let Some(modal) = &app.eclipse_modal else {
+        return;
+    };
+    let agent_id = modal.agent_id;
+    match key.code {
+        KeyCode::Esc => {
+            app.eclipse_modal = None;
+            app.needs_redraw = true;
+        }
+        KeyCode::Enter => {
+            let response = modal.response.clone();
+            app.eclipse_modal = None;
+            let _ = writer
+                .send(ClientMessage::AgentRespond { agent_id, response })
+                .await;
+            app.needs_redraw = true;
+        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.eclipse_modal = None;
+            let _ = writer.send(ClientMessage::AgentAbort { agent_id }).await;
+            app.needs_redraw = true;
+        }
+        KeyCode::Backspace => {
+            if let Some(m) = &mut app.eclipse_modal {
+                m.response.pop();
+            }
+            app.needs_redraw = true;
+        }
+        KeyCode::Char(c) => {
+            if let Some(m) = &mut app.eclipse_modal {
+                m.response.push(c);
+            }
+            app.needs_redraw = true;
+        }
+        _ => {}
+    }
+}
+
 async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
+    // Eclipse modal captures all keyboard input when open.
+    if app.eclipse_modal.is_some() {
+        handle_eclipse_key(key, app, writer).await;
+        return;
+    }
+
     if app.show_help {
         app.show_help = false;
         app.needs_redraw = true;
@@ -659,8 +704,15 @@ async fn handle_mouse(
                     .iter()
                     .any(|a| a.status == orbit_protocol::AgentStatus::Blocked);
                 if any_blocked && mouse.row == 3 && (1..=9).contains(&col_in_inner) {
-                    // [Respond] — placeholder
-                    app.needs_redraw = true;
+                    // [Respond] banner — open Eclipse modal for the first blocked agent
+                    if let Some(blocked) = app
+                        .agents
+                        .iter()
+                        .find(|a| a.status == orbit_protocol::AgentStatus::Blocked)
+                    {
+                        let agent_id = blocked.id;
+                        crate::tui::widgets::eclipse_modal::open(app, agent_id);
+                    }
                     return;
                 }
 
@@ -713,14 +765,9 @@ async fn handle_mouse(
                                     let _ =
                                         writer.send(ClientMessage::AgentAbort { agent_id }).await;
                                 }
-                                // Slot 1: [Resp] (Blocked) — send response to unblock agent
+                                // Slot 1: [Resp] (Blocked) — open Eclipse modal
                                 (1, orbit_protocol::AgentStatus::Blocked) => {
-                                    let _ = writer
-                                        .send(ClientMessage::AgentRespond {
-                                            agent_id,
-                                            response: String::new(),
-                                        })
-                                        .await;
+                                    crate::tui::widgets::eclipse_modal::open(app, agent_id);
                                 }
                                 // Slot 2: [Abrt] (Blocked)
                                 (2, orbit_protocol::AgentStatus::Blocked) => {
