@@ -10,6 +10,7 @@ use orbit_protocol::{
 use portable_pty::PtySize;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
+use crate::agent::AgentRegistry;
 use crate::pty::{self, SharedChild, SharedMaster, SharedVtParser};
 
 const ADJECTIVES: &[&str] = &[
@@ -85,6 +86,7 @@ pub struct SessionState {
     pub event_bus: broadcast::Sender<ServerEvent>,
     pub shell: String,
     pub cwd: String,
+    pub agent_registry: Arc<AgentRegistry>,
 }
 
 impl SessionState {
@@ -98,8 +100,14 @@ impl SessionState {
         rows: u16,
     ) -> anyhow::Result<Self> {
         let pane_id = PaneId(0);
+        let space_id = SpaceId(0);
         let tab_id = TabId(0);
+        let agent_registry = AgentRegistry::new(event_bus.clone());
         let handles = pty::spawn_pty(pane_id, &shell, &cwd, cols, rows, event_bus.clone()).await?;
+
+        if let Some(pid) = handles.child_pid {
+            Arc::clone(&agent_registry).watch_pane(pane_id, space_id, pid);
+        }
 
         let mut panes = HashMap::new();
         panes.insert(
@@ -123,7 +131,7 @@ impl SessionState {
         );
 
         Ok(Self {
-            space_id: SpaceId(0),
+            space_id,
             space_name: generate_space_name(&[]),
             panes: RwLock::new(panes),
             tabs: RwLock::new(tabs),
@@ -134,11 +142,12 @@ impl SessionState {
             event_bus,
             shell,
             cwd,
+            agent_registry,
         })
     }
 
     /// Create a session with shared pane/tab ID counters (used by SpaceManager).
-    // All 9 arguments are distinct required inputs; a builder would be heavier than necessary.
+    // All arguments are distinct required inputs; a builder would be heavier than necessary.
     #[allow(clippy::too_many_arguments)]
     pub async fn with_counters(
         event_bus: broadcast::Sender<ServerEvent>,
@@ -150,12 +159,17 @@ impl SessionState {
         space_name: String,
         next_pane_id: Arc<AtomicU32>,
         next_tab_id: Arc<AtomicU32>,
+        agent_registry: Arc<AgentRegistry>,
     ) -> anyhow::Result<Self> {
         let pane_id = PaneId(next_pane_id.fetch_add(1, Ordering::Relaxed));
         let tab_id = TabId(next_tab_id.fetch_add(1, Ordering::Relaxed));
         let tab_name = format!("tab{}", tab_id.0);
 
         let handles = pty::spawn_pty(pane_id, &shell, &cwd, cols, rows, event_bus.clone()).await?;
+
+        if let Some(pid) = handles.child_pid {
+            Arc::clone(&agent_registry).watch_pane(pane_id, space_id, pid);
+        }
 
         let mut panes = HashMap::new();
         panes.insert(
@@ -190,6 +204,7 @@ impl SessionState {
             event_bus,
             shell,
             cwd,
+            agent_registry,
         })
     }
 
@@ -213,6 +228,10 @@ impl SessionState {
             self.event_bus.clone(),
         )
         .await?;
+
+        if let Some(pid) = handles.child_pid {
+            Arc::clone(&self.agent_registry).watch_pane(new_id, self.space_id, pid);
+        }
 
         {
             let mut panes = self.panes.write().await;
@@ -308,6 +327,10 @@ impl SessionState {
         )
         .await
         .context("failed to spawn PTY for new tab")?;
+
+        if let Some(pid) = handles.child_pid {
+            Arc::clone(&self.agent_registry).watch_pane(pane_id, self.space_id, pid);
+        }
 
         {
             let mut panes = self.panes.write().await;
@@ -516,6 +539,7 @@ pub struct SpaceManager {
     next_pane_id: Arc<AtomicU32>,
     next_tab_id: Arc<AtomicU32>,
     pub event_bus: broadcast::Sender<ServerEvent>,
+    pub agent_registry: Arc<AgentRegistry>,
     shell: String,
     cwd: String,
 }
@@ -531,6 +555,7 @@ impl SpaceManager {
         let next_space_id = AtomicU32::new(0);
         let next_pane_id = Arc::new(AtomicU32::new(0));
         let next_tab_id = Arc::new(AtomicU32::new(0));
+        let agent_registry = AgentRegistry::new(event_bus.clone());
 
         let space_id = SpaceId(next_space_id.fetch_add(1, Ordering::Relaxed));
         let space_name = generate_space_name(&[]);
@@ -546,6 +571,7 @@ impl SpaceManager {
                 space_name,
                 Arc::clone(&next_pane_id),
                 Arc::clone(&next_tab_id),
+                Arc::clone(&agent_registry),
             )
             .await?,
         );
@@ -561,6 +587,7 @@ impl SpaceManager {
             next_pane_id,
             next_tab_id,
             event_bus,
+            agent_registry,
             shell,
             cwd,
         })
@@ -601,6 +628,7 @@ impl SpaceManager {
                 space_name,
                 Arc::clone(&self.next_pane_id),
                 Arc::clone(&self.next_tab_id),
+                Arc::clone(&self.agent_registry),
             )
             .await?,
         );
@@ -651,7 +679,7 @@ impl SpaceManager {
         FullState {
             spaces: space_infos,
             active_space: active,
-            agents: vec![],
+            agents: self.agent_registry.get_agents().await,
         }
     }
 }

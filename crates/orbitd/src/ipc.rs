@@ -130,6 +130,9 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
                             tracing::warn!("switch_space: {e:#}");
                         }
                     }
+                    ClientMessage::AgentAbort { agent_id } => {
+                        space_manager.agent_registry.abort_agent(agent_id).await;
+                    }
                     _ => {}
                 }
             }

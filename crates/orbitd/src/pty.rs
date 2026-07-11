@@ -16,6 +16,7 @@ pub struct PtyHandles {
     pub parser: SharedVtParser,
     pub master: SharedMaster,
     pub child: SharedChild,
+    pub child_pid: Option<u32>,
     pub input_tx: mpsc::Sender<Vec<u8>>,
 }
 
@@ -60,6 +61,7 @@ pub async fn spawn_pty(
         .try_clone_reader()
         .context("failed to clone PTY reader")?;
 
+    let child_pid = child.process_id();
     let shared_parser: SharedVtParser = Arc::new(Mutex::new(VtParser::new(cols, rows)));
     let shared_master: SharedMaster = Arc::new(Mutex::new(pair.master));
     let shared_child: SharedChild = Arc::new(Mutex::new(child));
@@ -118,6 +120,7 @@ pub async fn spawn_pty(
         parser: shared_parser,
         master: shared_master,
         child: shared_child,
+        child_pid,
         input_tx,
     })
 }
