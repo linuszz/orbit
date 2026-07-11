@@ -681,3 +681,46 @@ fn extract_progress(text: &str) -> Option<f32> {
     }
     last
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_progress_basic() {
+        assert_eq!(extract_progress("Compiling 75%"), Some(0.75));
+        assert_eq!(extract_progress("done 100%"), Some(1.0));
+        assert_eq!(extract_progress("0%"), Some(0.0));
+        assert_eq!(extract_progress("no percent here"), None);
+    }
+
+    #[test]
+    fn extract_progress_last_wins() {
+        assert_eq!(extract_progress("step 1: 30% step 2: 60%"), Some(0.6));
+    }
+
+    #[test]
+    fn extract_progress_decimal() {
+        assert_eq!(extract_progress("99.5%"), Some(0.995));
+    }
+
+    #[test]
+    fn extract_progress_out_of_range_ignored() {
+        assert_eq!(extract_progress("200% error"), None);
+        assert_eq!(extract_progress("101%"), None);
+    }
+
+    #[test]
+    fn strip_ansi_basic() {
+        assert_eq!(strip_ansi("hello"), "hello");
+        assert_eq!(strip_ansi("\x1b[32mgreen\x1b[0m"), "green");
+        assert_eq!(strip_ansi("\x1b]0;title\x07text"), "text");
+    }
+
+    #[test]
+    fn strip_ansi_csi_sequences() {
+        // CSI cursor move + reset
+        assert_eq!(strip_ansi("\x1b[2J\x1b[H"), "");
+        assert_eq!(strip_ansi("a\x1b[1mb\x1b[0mc"), "abc");
+    }
+}
