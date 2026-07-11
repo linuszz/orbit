@@ -130,7 +130,7 @@ impl AgentRegistry {
                                     .map(|l| l.trim())
                                     .rfind(|l| !l.is_empty() && l.len() > 3)
                                 {
-                                    last_output_line = line.to_string();
+                                    last_output_line = strip_ansi(line);
                                 }
 
                                 // Scan for progress percentage ("75%" or "75.5%") in output tail.
@@ -149,11 +149,11 @@ impl AgentRegistry {
                                     };
                                     match current {
                                         Some(AgentStatus::Working) if is_prompt => {
-                                            let block_msg = tail
-                                                .lines()
-                                                .rfind(|l| !l.trim().is_empty())
-                                                .unwrap_or("")
-                                                .to_string();
+                                            let block_msg = strip_ansi(
+                                                tail.lines()
+                                                    .rfind(|l| !l.trim().is_empty())
+                                                    .unwrap_or(""),
+                                            );
                                             let new_detail = {
                                                 let mut agents = self.agents.write().await;
                                                 agents
@@ -571,6 +571,55 @@ fn process_exists(pid: u32) -> bool {
         let _ = pid;
         false
     }
+}
+
+/// Strip ANSI/VT escape sequences (CSI, OSC, ESC+single-char) from `text`.
+/// Used to clean up PTY output before storing it as block_msg or last_output_line.
+fn strip_ansi(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b {
+            i += 1;
+            if i >= bytes.len() {
+                break;
+            }
+            match bytes[i] {
+                b'[' => {
+                    // CSI: ESC [ ... final (final is 0x40–0x7e)
+                    i += 1;
+                    while i < bytes.len() && !(0x40..=0x7eu8).contains(&bytes[i]) {
+                        i += 1;
+                    }
+                    i += 1; // skip final byte
+                }
+                b']' => {
+                    // OSC: ESC ] ... ST (ST = ESC\ or BEL)
+                    i += 1;
+                    while i < bytes.len() {
+                        if bytes[i] == 0x07 {
+                            i += 1;
+                            break;
+                        }
+                        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+                _ => {
+                    // ESC + single char (e.g. ESC M, ESC 7, ESC 8)
+                    i += 1;
+                }
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Scan `text` for the last "N%" or "N.N%" pattern and return it as a fraction [0.0, 1.0].
