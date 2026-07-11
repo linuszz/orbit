@@ -400,11 +400,14 @@ impl App {
         }
     }
 
-    /// True when the animation tick timer should be active.
+    /// True when the animation tick timer should be active (Working/Blocked pulse + Error blink).
     pub fn has_active_agents(&self) -> bool {
-        self.agents
-            .iter()
-            .any(|a| matches!(a.status, AgentStatus::Working | AgentStatus::Blocked))
+        self.agents.iter().any(|a| {
+            matches!(
+                a.status,
+                AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Error
+            )
+        })
     }
 
     pub fn pane_tree(&self) -> &PaneLayout {
@@ -750,6 +753,11 @@ impl App {
                 self.agent_scroll_offset = self
                     .agent_scroll_offset
                     .min(self.agents.len().saturating_sub(1));
+                // Clamp AgentPanel keyboard selection to valid range.
+                if let InputMode::AgentPanel { selected } = &mut self.mode {
+                    let max = self.agents.len().saturating_sub(1);
+                    *selected = (*selected).min(max);
+                }
                 self.needs_redraw = true;
             }
             ServerEvent::AgentStatusChanged {

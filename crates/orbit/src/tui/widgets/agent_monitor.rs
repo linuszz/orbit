@@ -30,24 +30,60 @@ fn status_color(status: &AgentStatus) -> ratatui::style::Color {
     }
 }
 
-/// Animated status color for Working (slow pulse ~2 s) and Blocked (fast pulse ~0.5 s).
+/// Smooth lerp between two u8 values at phase in [0.0, 1.0].
+#[inline(always)]
+fn lerp_u8(a: u8, b: u8, phase: f32) -> u8 {
+    (a as f32 + phase * (b as f32 - a as f32)) as u8
+}
+
+/// Triangle wave: returns phase in [0.0, 1.0] over `period` ticks, peaking at mid-cycle.
+#[inline(always)]
+fn triangle_phase(tick: u64, period: u64) -> f32 {
+    let t = (tick % period) as f32;
+    let half = period as f32 / 2.0;
+    if t < half {
+        t / half
+    } else {
+        (period as f32 - t) / half
+    }
+}
+
+/// Working slow pulse color (90 ticks / ~1.5 s): ACCENT_DIM → ACCENT_BRIGHT.
+pub fn working_pulse_color(tick: u64) -> ratatui::style::Color {
+    let p = triangle_phase(tick, 90);
+    ratatui::style::Color::Rgb(
+        lerp_u8(120, 251, p), // #783c00 → #fba028
+        lerp_u8(60, 160, p),
+        lerp_u8(0, 40, p),
+    )
+}
+
+/// Blocked fast pulse color (48 ticks / ~0.8 s): dark gold → ACCENT_BLOCKED.
+pub fn blocked_pulse_color(tick: u64) -> ratatui::style::Color {
+    let p = triangle_phase(tick, 48);
+    ratatui::style::Color::Rgb(
+        lerp_u8(100, 217, p), // dim → #d9ac00
+        lerp_u8(85, 172, p),
+        0,
+    )
+}
+
+/// Error blink color (60 ticks / ~1.0 s): dark red → ACCENT_ERROR.
+pub fn error_blink_color(tick: u64) -> ratatui::style::Color {
+    let p = triangle_phase(tick, 60);
+    ratatui::style::Color::Rgb(
+        lerp_u8(80, 200, p), // dark red → #c8321e
+        lerp_u8(10, 50, p),
+        lerp_u8(5, 30, p),
+    )
+}
+
+/// Animated status color per spec §3.3 animation table.
 fn animated_status_color(status: &AgentStatus, tick: u64) -> ratatui::style::Color {
-    use ratatui::style::Color;
     match status {
-        AgentStatus::Working => {
-            if (tick / 62) % 2 == 0 {
-                ACCENT
-            } else {
-                Color::Rgb(120, 60, 0)
-            }
-        }
-        AgentStatus::Blocked => {
-            if (tick / 15) % 2 == 0 {
-                ACCENT_BLOCKED
-            } else {
-                Color::Rgb(100, 85, 0)
-            }
-        }
+        AgentStatus::Working => working_pulse_color(tick),
+        AgentStatus::Blocked => blocked_pulse_color(tick),
+        AgentStatus::Error => error_blink_color(tick),
         _ => status_color(status),
     }
 }
@@ -128,13 +164,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("[{}]", n)
         };
-        // Badge pulses fast when blocked, matching Eclipse banner and card icons.
+        // Badge pulses with smooth Blocked animation when any agent is blocked.
         let badge_color = if any_blocked {
-            if (app.tick_count / 15) % 2 == 0 {
-                ACCENT_BLOCKED
-            } else {
-                ratatui::style::Color::Rgb(100, 85, 0)
-            }
+            blocked_pulse_color(app.tick_count)
         } else {
             FG_MUTED
         };
@@ -213,12 +245,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("{} agents", blocked_agents.len())
         };
-        // Fast-pulse the ◎ icon at ~30-tick half-period (~480 ms), matching Blocked card icons.
-        let icon_color = if (app.tick_count / 15) % 2 == 0 {
-            ACCENT_BLOCKED
-        } else {
-            ratatui::style::Color::Rgb(100, 85, 0)
-        };
+        // Eclipse icon pulses with smooth Blocked animation (48-tick / ~0.8 s cycle).
+        let icon_color = blocked_pulse_color(app.tick_count);
         let text_part = format!(
             "{:<width$}",
             format!(" Eclipse: {}", name_part),
