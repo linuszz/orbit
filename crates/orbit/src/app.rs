@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 
 use orbit_core::VtParser;
 use orbit_protocol::{
@@ -212,6 +213,8 @@ pub struct App {
     pub selection: Option<Selection>,
     pub agents: Vec<AgentInfo>,
     pub agent_metrics: HashMap<AgentId, AgentMetrics>,
+    /// Client-side start times for smooth live duration display.
+    pub agent_start_times: HashMap<AgentId, Instant>,
     pub agent_hovered: Option<AgentHover>,
     pub agent_scroll_offset: usize,
     pub eclipse_modal: Option<EclipseModalState>,
@@ -345,6 +348,17 @@ impl App {
             selection: None,
             agents: state.agents.clone(),
             agent_metrics: HashMap::new(),
+            agent_start_times: {
+                let mut m = HashMap::new();
+                for a in &state.agents {
+                    let duration_s = a.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
+                    m.insert(
+                        a.id,
+                        Instant::now() - std::time::Duration::from_secs(duration_s as u64),
+                    );
+                }
+                m
+            },
             agent_hovered: None,
             agent_scroll_offset: 0,
             eclipse_modal: None,
@@ -683,6 +697,7 @@ impl App {
                 self.needs_redraw = true;
             }
             ServerEvent::AgentCreated(info) => {
+                self.agent_start_times.insert(info.id, Instant::now());
                 self.agents.push(info.clone());
                 self.sort_agents();
                 self.agent_panel_visible = true;
@@ -693,6 +708,7 @@ impl App {
                 if self.eclipse_modal.as_ref().map(|m| m.agent_id) == Some(*id) {
                     self.eclipse_modal = None;
                 }
+                self.agent_start_times.remove(id);
                 self.agent_metrics.remove(id);
                 self.agents.retain(|a| a.id != *id);
                 if let Some(AgentHover::CardBtn { card_idx, .. }) = &self.agent_hovered {

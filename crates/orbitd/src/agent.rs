@@ -96,6 +96,8 @@ impl AgentRegistry {
         tokio::spawn(async move {
             // pid → (AgentId, start_time); only populated on Linux
             let mut tracked: HashMap<u32, (AgentId, Instant)> = HashMap::new();
+            // Last meaningful output line seen from this pane (shown in card row 2).
+            let mut last_output_line = String::new();
             let mut poll_count: u32 = 0;
             let mut rx = self.event_bus.subscribe();
             // Start first tick after 500 ms to match old sleep-at-top-of-loop behaviour.
@@ -116,6 +118,15 @@ impl AgentRegistry {
                                 let tail = String::from_utf8_lossy(&data[tail_start..]);
                                 let is_prompt =
                                     BLOCK_PATTERNS.iter().any(|p| tail.contains(p));
+
+                                // Update last meaningful output line for the activity display.
+                                if let Some(line) = tail
+                                    .lines()
+                                    .map(|l| l.trim())
+                                    .rfind(|l| !l.is_empty() && l.len() > 3)
+                                {
+                                    last_output_line = line.to_string();
+                                }
 
                                 for (agent_id, _) in tracked.values() {
                                     let current = {
@@ -307,12 +318,17 @@ impl AgentRegistry {
                                 #[cfg(target_os = "linux")]
                                 {
                                     let rss_kb = read_rss_kb(*cpid);
+                                    let recent = if last_output_line.is_empty() {
+                                        vec![]
+                                    } else {
+                                        vec![last_output_line.clone()]
+                                    };
                                     let _ = self.event_bus.send(ServerEvent::AgentMetricsUpdated {
                                         agent_id: *agent_id,
                                         metrics: AgentMetrics {
                                             cpu_percent: None,
                                             rss_kb,
-                                            recent_lines: vec![],
+                                            recent_lines: recent,
                                         },
                                     });
                                 }

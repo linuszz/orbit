@@ -355,7 +355,13 @@ fn render_card(
 
     // Row 1: " " + model (left) + [rss] + duration (right-aligned) — total w cols
     {
-        let duration_s = agent.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
+        // Live duration from client-side start time; falls back to detail.duration_s.
+        let duration_s = app
+            .agent_start_times
+            .get(&agent.id)
+            .map(|t| t.elapsed().as_secs() as u32)
+            .or_else(|| agent.detail.as_ref().map(|d| d.duration_s))
+            .unwrap_or(0);
         let dur_str = if duration_s > 0 {
             format_duration(duration_s)
         } else {
@@ -397,16 +403,27 @@ fn render_card(
         );
     }
 
-    // Row 2: " " + task description or block message
+    // Row 2: task/block_msg; when Working, prefer live recent_lines activity.
     {
-        let task_str = agent
-            .detail
-            .as_ref()
-            .and_then(|d| match agent.status {
-                AgentStatus::Blocked => d.block_msg.as_deref(),
-                _ => d.task.as_deref(),
-            })
-            .unwrap_or("");
+        let task_str = match agent.status {
+            AgentStatus::Blocked => agent
+                .detail
+                .as_ref()
+                .and_then(|d| d.block_msg.as_deref())
+                .unwrap_or(""),
+            AgentStatus::Working => {
+                // Show live activity line when available; fall back to task.
+                metrics
+                    .and_then(|m| m.recent_lines.first().map(String::as_str))
+                    .or_else(|| agent.detail.as_ref().and_then(|d| d.task.as_deref()))
+                    .unwrap_or("")
+            }
+            _ => agent
+                .detail
+                .as_ref()
+                .and_then(|d| d.task.as_deref())
+                .unwrap_or(""),
+        };
         let task = truncate_str(task_str, w.saturating_sub(1) as usize);
         let task_text = format!(" {:<width$}", task, width = w.saturating_sub(1) as usize);
         frame.render_widget(
