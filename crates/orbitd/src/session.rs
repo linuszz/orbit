@@ -12,15 +12,13 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use crate::pty::{self, SharedChild, SharedMaster, SharedVtParser};
 
 const ADJECTIVES: &[&str] = &[
-    "cosmic", "stellar", "quantum", "lunar", "solar", "orbital", "deep",
-    "silent", "swift", "apex", "delta", "zenith", "polar", "radiant",
-    "binary", "axial", "thermal", "mach", "ion", "photon",
+    "cosmic", "stellar", "quantum", "lunar", "solar", "orbital", "deep", "silent", "swift", "apex",
+    "delta", "zenith", "polar", "radiant", "binary", "axial", "thermal", "mach", "ion", "photon",
 ];
 
 const NOUNS: &[&str] = &[
-    "mars", "void", "nova", "horizon", "nebula", "atlas", "vega", "lyra",
-    "cygnus", "orbit", "pulse", "core", "arc", "link", "beacon", "vector",
-    "node", "flux", "rift", "zone",
+    "mars", "void", "nova", "horizon", "nebula", "atlas", "vega", "lyra", "cygnus", "orbit",
+    "pulse", "core", "arc", "link", "beacon", "vector", "node", "flux", "rift", "zone",
 ];
 
 pub fn generate_space_name(existing: &[&str]) -> String {

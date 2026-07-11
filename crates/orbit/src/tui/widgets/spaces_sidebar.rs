@@ -43,10 +43,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     // Divider
     let div = "\u{2500}".repeat(w as usize);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            div,
-            Style::default().fg(BORDER),
-        ))),
+        Paragraph::new(Line::from(Span::styled(div, Style::default().fg(BORDER)))),
         Rect {
             x,
             y,
@@ -89,10 +86,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(top_left, Style::default().fg(accent_fg).bg(card_bg)),
-                Span::styled(
-                    rest_of_border,
-                    Style::default().fg(BORDER).bg(card_bg),
-                ),
+                Span::styled(rest_of_border, Style::default().fg(BORDER).bg(card_bg)),
             ]))
             .style(Style::default().bg(card_bg)),
             Rect {
@@ -263,10 +257,7 @@ fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {
     // Expand hint at bottom
     let expand_y = area.y + area.height.saturating_sub(1);
     frame.render_widget(
-        Paragraph::new(Span::styled(
-            "\u{00BB}",
-            Style::default().fg(FG_MUTED),
-        )),
+        Paragraph::new(Span::styled("\u{00BB}", Style::default().fg(FG_MUTED))),
         Rect {
             x,
             y: expand_y,
