@@ -131,9 +131,9 @@ fn format_rss(rss_kb: u32) -> String {
 
 fn format_duration(secs: u32) -> String {
     if secs < 60 {
-        format!("{secs}s")
+        "now".to_string()
     } else if secs < 3600 {
-        format!("{}m{}s", secs / 60, secs % 60)
+        format!("{}m", secs / 60)
     } else {
         format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
     }
@@ -330,17 +330,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let visible_agents: Vec<&AgentInfo> =
             app.agents.iter().skip(app.agent_scroll_offset).collect();
         let total = app.agents.len();
+        // Reserve 1 row at the bottom for the "[+] Add Satellite" footer.
+        let content_bottom = area.y + area.height.saturating_sub(1);
         for (card_idx, agent) in visible_agents.iter().enumerate() {
-            if y + 5 > area.y + area.height {
-                // Show "▼ N more" indicator when cards are truncated.
+            if y + 5 > content_bottom {
+                // Show "▼ N more" indicator when cards are truncated (above footer).
                 let remaining = total - app.agent_scroll_offset - card_idx;
-                if remaining > 0 && y < area.y + area.height {
+                if remaining > 0 && content_bottom >= 1 && y < content_bottom {
                     let more_text = format!(" \u{25BE} {} more", remaining);
                     frame.render_widget(
                         Paragraph::new(Span::styled(more_text, Style::default().fg(FG_MUTED))),
                         Rect {
                             x: ix,
-                            y: area.y + area.height - 1,
+                            y: content_bottom.saturating_sub(1),
                             width: iw,
                             height: 1,
                         },
@@ -366,6 +368,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             }
         }
     }
+
+    render_footer(frame, ix, iw, area, app);
 }
 
 fn render_card(
@@ -634,6 +638,26 @@ fn render_card(
             },
         );
     }
+}
+
+/// Footer: "[+] Add Satellite" pinned to the last row of the agent panel.
+fn render_footer(frame: &mut Frame, ix: u16, iw: u16, area: Rect, app: &App) {
+    let footer_y = area.y + area.height.saturating_sub(1);
+    let (fg, bg) = if app.agent_hovered == Some(AgentHover::PanelFooter) {
+        (BG_PRIMARY, ACCENT_HOVER)
+    } else {
+        (FG_MUTED, BG_SECONDARY)
+    };
+    let label = format!("{:<width$}", " [+] Add Satellite", width = iw as usize);
+    frame.render_widget(
+        Paragraph::new(Span::styled(label, Style::default().fg(fg).bg(bg))),
+        Rect {
+            x: ix,
+            y: footer_y,
+            width: iw,
+            height: 1,
+        },
+    );
 }
 
 /// Returns the row (absolute) where agent card `card_idx` starts, given panel geometry.

@@ -979,6 +979,12 @@ async fn handle_mouse(
                 let inner_x = panel_x + 1;
                 let col_in_inner = mouse.column.saturating_sub(inner_x);
 
+                // Footer row (last row): "[+] Add Satellite"
+                if mouse.row + 1 == term_h {
+                    crate::tui::widgets::launch_modal::open(app);
+                    return;
+                }
+
                 // Header row (row 0): [+] and × buttons
                 if mouse.row == 0 {
                     if mouse.column == term_w.saturating_sub(1) {
@@ -1423,6 +1429,8 @@ async fn handle_mouse(
                     } else {
                         None
                     }
+                } else if mouse.row + 1 == term_h {
+                    Some(AgentHover::PanelFooter)
                 } else if any_blocked
                     && mouse.row == 3 + if app.agent_scroll_offset > 0 { 1 } else { 0 }
                     && (1..=9).contains(&col_in_inner)

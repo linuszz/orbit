@@ -208,7 +208,12 @@ pub enum AgentHover {
     HeaderAdd,
     HeaderClose,
     EclipseRespond,
-    CardBtn { card_idx: usize, slot: u8 },
+    CardBtn {
+        card_idx: usize,
+        slot: u8,
+    },
+    /// "[+] Add Satellite" footer button at the bottom of the panel.
+    PanelFooter,
 }
 
 pub struct App {
