@@ -96,8 +96,22 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
         "new_tab" => {
             let _ = writer.send(ClientMessage::NewTab { name: None }).await;
         }
-        "next_tab" => app.next_tab(),
-        "prev_tab" => app.prev_tab(),
+        "next_tab" => {
+            app.next_tab();
+            let _ = writer
+                .send(ClientMessage::SwitchTab {
+                    tab_id: app.active_tab_id,
+                })
+                .await;
+        }
+        "prev_tab" => {
+            app.prev_tab();
+            let _ = writer
+                .send(ClientMessage::SwitchTab {
+                    tab_id: app.active_tab_id,
+                })
+                .await;
+        }
         "toggle_sidebar" => app.sidebar_visible = !app.sidebar_visible,
         "toggle_agent" => app.agent_panel_visible = !app.agent_panel_visible,
         "detach" => app.should_quit = true,
@@ -445,14 +459,7 @@ async fn handle_mouse(
                         x += label_len;
                     }
                     if mouse.column >= x && mouse.column < x + 3 {
-                        app.pending_new_tab = true;
-                        let _ = writer
-                            .send(ClientMessage::SplitPane {
-                                tab_id: app.active_tab_id,
-                                pane_id: app.active_pane,
-                                direction: SplitDir::Horizontal,
-                            })
-                            .await;
+                        let _ = writer.send(ClientMessage::NewTab { name: None }).await;
                         app.needs_redraw = true;
                         return;
                     }

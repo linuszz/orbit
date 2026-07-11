@@ -128,6 +128,7 @@ impl PaneState {
 
 #[derive(Debug, Clone)]
 pub struct Tab {
+    pub id: TabId,
     pub name: String,
     pub pane_tree: PaneLayout,
 }
@@ -139,8 +140,6 @@ pub struct App {
     pub active_tab_id: TabId,
     pub active_pane: PaneId,
     pub pending_split: Option<(PaneId, SplitDir)>,
-    pub pending_new_tab: bool,
-    pub tab_counter: usize,
     pub mode: InputMode,
     pub should_quit: bool,
     pub needs_redraw: bool,
@@ -189,7 +188,6 @@ impl App {
         let mut active_tab_idx = 0;
         let mut active_tab_id = TabId(0);
         let mut active_pane = PaneId(0);
-        let mut tab_counter: usize = 0;
 
         if let Some(s) = space {
             for pane in &s.panes {
@@ -201,17 +199,17 @@ impl App {
                 panes.insert(pane.id, ps);
             }
 
-            for tab_info in &s.tabs {
+            for (i, tab_info) in s.tabs.iter().enumerate() {
                 tabs.push(Tab {
+                    id: tab_info.id,
                     name: tab_info.name.clone(),
                     pane_tree: tab_info.layout.clone(),
                 });
                 if tab_info.id == s.active_tab {
-                    active_tab_idx = tab_counter;
+                    active_tab_idx = i;
                     active_tab_id = tab_info.id;
                     active_pane = tab_info.active_pane;
                 }
-                tab_counter += 1;
             }
         }
 
@@ -225,6 +223,7 @@ impl App {
                 .and_then(|s| s.tabs.first().map(|t| t.layout.clone()))
                 .unwrap_or(PaneLayout::Leaf(first_pane));
             tabs.push(Tab {
+                id: TabId(0),
                 name: "dev".to_string(),
                 pane_tree,
             });
@@ -237,8 +236,6 @@ impl App {
             active_tab_id,
             active_pane,
             pending_split: None,
-            pending_new_tab: false,
-            tab_counter,
             mode: InputMode::Normal,
             should_quit: false,
             needs_redraw: true,
@@ -280,6 +277,7 @@ impl App {
     pub fn next_tab(&mut self) {
         if self.tabs.len() > 1 {
             self.active_tab = (self.active_tab + 1) % self.tabs.len();
+            self.active_tab_id = self.tabs[self.active_tab].id;
             let leaves = self.pane_tree().leaves();
             if let Some(&first) = leaves.first() {
                 self.active_pane = first;
@@ -291,6 +289,7 @@ impl App {
     pub fn prev_tab(&mut self) {
         if self.tabs.len() > 1 {
             self.active_tab = (self.active_tab + self.tabs.len() - 1) % self.tabs.len();
+            self.active_tab_id = self.tabs[self.active_tab].id;
             let leaves = self.pane_tree().leaves();
             if let Some(&first) = leaves.first() {
                 self.active_pane = first;
@@ -399,6 +398,7 @@ impl App {
                     let mut found_active = false;
                     for (i, tab_info) in s.tabs.iter().enumerate() {
                         new_tabs.push(Tab {
+                            id: tab_info.id,
                             name: tab_info.name.clone(),
                             pane_tree: tab_info.layout.clone(),
                         });
@@ -410,6 +410,7 @@ impl App {
                     if !new_tabs.is_empty() {
                         self.tabs = new_tabs;
                         self.active_tab = if found_active { new_active_idx } else { 0 };
+                        self.active_tab_id = s.active_tab;
                         if let Some(active_tab) = self.tabs.get(self.active_tab) {
                             if let Some(&first_leaf) = active_tab.pane_tree.leaves().first() {
                                 self.active_pane = first_leaf;
@@ -439,20 +440,13 @@ impl App {
                             existing.sync_from_server(&pane.cell_grid);
                         }
                     } else {
-                        let ps =
-                            PaneState::new(pane.cell_grid.cols.max(1), pane.cell_grid.rows.max(1));
+                        let ps = PaneState::new(
+                            pane.cell_grid.cols.max(1),
+                            pane.cell_grid.rows.max(1),
+                        );
                         self.panes.insert(pane.id, ps);
 
-                        if self.pending_new_tab {
-                            self.pending_new_tab = false;
-                            self.tab_counter += 1;
-                            self.tabs.push(Tab {
-                                name: format!("tab{}", self.tab_counter),
-                                pane_tree: PaneLayout::Leaf(pane.id),
-                            });
-                            self.active_tab = self.tabs.len() - 1;
-                            self.active_pane = pane.id;
-                        } else if let Some((target, dir)) = self.pending_split.take() {
+                        if let Some((target, dir)) = self.pending_split.take() {
                             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                                 tab.pane_tree.split_leaf(target, dir, pane.id);
                             }
@@ -464,20 +458,31 @@ impl App {
                 for &id in old_ids.iter() {
                     if !new_ids.contains(&id) {
                         self.panes.remove(&id);
-                        for tab in &mut self.tabs {
-                            tab.pane_tree.remove_leaf(id);
-                        }
                     }
                 }
 
-                self.tabs.retain(|t| !t.pane_tree.leaves().is_empty());
-                if self.active_tab >= self.tabs.len() {
-                    self.active_tab = self.tabs.len().saturating_sub(1);
+                let mut new_tabs = Vec::new();
+                let mut new_active_idx = 0;
+                let mut found_active = false;
+                for (i, tab_info) in info.tabs.iter().enumerate() {
+                    new_tabs.push(Tab {
+                        id: tab_info.id,
+                        name: tab_info.name.clone(),
+                        pane_tree: tab_info.layout.clone(),
+                    });
+                    if tab_info.id == info.active_tab {
+                        new_active_idx = i;
+                        found_active = true;
+                    }
                 }
-
-                if !info.panes.is_empty() {
-                    if let Some(active_tab_info) = info.tabs.iter().find(|t| t.id == info.active_tab) {
-                        self.active_pane = active_tab_info.active_pane;
+                if !new_tabs.is_empty() {
+                    self.tabs = new_tabs;
+                    self.active_tab = if found_active { new_active_idx } else { 0 };
+                    self.active_tab_id = info.active_tab;
+                    if let Some(active_tab) = self.tabs.get(self.active_tab) {
+                        if let Some(&first_leaf) = active_tab.pane_tree.leaves().first() {
+                            self.active_pane = first_leaf;
+                        }
                     }
                 }
 

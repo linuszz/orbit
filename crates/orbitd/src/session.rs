@@ -278,6 +278,9 @@ impl SessionState {
     pub async fn switch_tab(&self, tab_id: TabId) {
         let mut active = self.active_tab.write().await;
         *active = tab_id;
+        let _ = self
+            .event_bus
+            .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 
     pub async fn send_input(&self, _tab_id: TabId, pane_id: PaneId, data: Vec<u8>) {
