@@ -91,6 +91,10 @@ pub enum ClientMessage {
         from_seq: u64,
         count: u16,
     },
+
+    CopyToClipboard {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

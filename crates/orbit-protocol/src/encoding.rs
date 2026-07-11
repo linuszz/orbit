@@ -66,6 +66,20 @@ mod tests {
     }
 
     #[test]
+    fn copy_to_clipboard_roundtrip() {
+        let msg = ClientMessage::CopyToClipboard {
+            text: "hello world".to_string(),
+        };
+        let bytes = encode_message(&msg).unwrap();
+        let (decoded, _): (ClientMessage, _) =
+            bincode::serde::decode_from_slice(&bytes[4..], bincode::config::standard()).unwrap();
+        match decoded {
+            ClientMessage::CopyToClipboard { text } => assert_eq!(text, "hello world"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
     fn server_event_roundtrip() {
         let msg = ServerEvent::Ping;
         let bytes = encode_message(&msg).unwrap();

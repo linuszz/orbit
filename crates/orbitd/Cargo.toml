@@ -27,4 +27,5 @@ libc = { workspace = true }
 regex = { workspace = true }
 orbit-protocol = { workspace = true }
 orbit-core = { workspace = true }
+arboard = { workspace = true }
 sysinfo = { version = "0.30", optional = true }

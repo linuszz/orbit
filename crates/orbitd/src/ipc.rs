@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{bail, Result};
+use arboard::Clipboard;
 use orbit_protocol::{ClientMessage, ServerEvent, PROTOCOL_VERSION};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::debug;
@@ -88,6 +89,14 @@ pub async fn handle_client(mut stream: Stream, session: Arc<SessionState>) -> Re
                             capabilities: orbit_protocol::Capabilities::default(),
                             state: s,
                         }).await;
+                    }
+                    ClientMessage::CopyToClipboard { text } => {
+                        if let Ok(mut cb) = Clipboard::new() {
+                            let _ = cb.set_text(text);
+                        }
+                    }
+                    ClientMessage::SwitchSpace { space_id } => {
+                        session.switch_space(space_id).await;
                     }
                     _ => {}
                 }

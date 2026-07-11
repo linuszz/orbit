@@ -295,6 +295,11 @@ impl SessionState {
             .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 
+    pub async fn switch_space(&self, _space_id: orbit_protocol::SpaceId) {
+        // Multi-space switching: future implementation.
+        // For now the daemon runs a single space; this message is accepted but ignored.
+    }
+
     pub async fn send_input(&self, _tab_id: TabId, pane_id: PaneId, data: Vec<u8>) {
         let panes = self.panes.read().await;
         if let Some(entry) = panes.get(&pane_id) {

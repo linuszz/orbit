@@ -58,6 +58,9 @@ vte = "0.13"
 # Unix-specific (SO_PEERCRED, getuid). Unix-only; gate with #[cfg(unix)].
 libc = "0.2"
 
+# Clipboard (orbitd-only; used for CopyToClipboard IPC handler)
+arboard = "3"
+
 # Phase 3 dependencies (commented out — activate when Phase 3 starts)
 # base64 = "0.22"  # Kitty graphics protocol image encoding
 
