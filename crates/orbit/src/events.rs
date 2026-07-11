@@ -831,8 +831,13 @@ async fn handle_mouse(
                         app.needs_redraw = true;
                         return;
                     }
-                    if mouse.column >= term_w.saturating_sub(14) {
+                    // " [A] Satellites " = 16 chars, right of the agent panel.
+                    let sats_start = term_w.saturating_sub(agent_w + 16);
+                    if mouse.column >= sats_start && mouse.column < term_w.saturating_sub(agent_w) {
                         app.agent_panel_visible = !app.agent_panel_visible;
+                        if !app.agent_panel_visible {
+                            app.agent_hovered = None;
+                        }
                         app.needs_redraw = true;
                         return;
                     }
@@ -1302,7 +1307,8 @@ async fn handle_mouse(
                 // Check [A] Satellites button (right-aligned, 16 chars wide)
                 if hovered.is_none() {
                     let badge_start = term_w.saturating_sub(agent_w + 16);
-                    if mouse.column >= badge_start {
+                    let badge_end = term_w.saturating_sub(agent_w);
+                    if mouse.column >= badge_start && mouse.column < badge_end {
                         hovered = Some(app.tabs.len() + 1);
                     }
                 }
