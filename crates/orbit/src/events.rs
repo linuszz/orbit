@@ -888,8 +888,19 @@ async fn handle_mouse(
                         app.needs_redraw = true;
                         return;
                     }
-                    // " [A] Satellites " = 16 chars, right of the agent panel.
-                    let sats_start = term_w.saturating_sub(agent_w + 16);
+                    // "[A] Satellites[badge] " — width varies with fleet badge.
+                    let sats_badge_len: u16 = if !app.agent_panel_visible && !app.agents.is_empty()
+                    {
+                        if app.agents.len() < 10 {
+                            3
+                        } else {
+                            4
+                        }
+                    } else {
+                        0
+                    };
+                    let sats_w = 16u16 + sats_badge_len;
+                    let sats_start = term_w.saturating_sub(agent_w + sats_w);
                     if mouse.column >= sats_start && mouse.column < term_w.saturating_sub(agent_w) {
                         app.agent_panel_visible = !app.agent_panel_visible;
                         if app.agent_panel_visible {
@@ -1365,9 +1376,19 @@ async fn handle_mouse(
                 if hovered.is_none() && col < acc + 3 {
                     hovered = Some(app.tabs.len());
                 }
-                // Check [A] Satellites button (right-aligned, 16 chars wide)
+                // Check [A] Satellites button (right-aligned, width varies with fleet badge).
                 if hovered.is_none() {
-                    let badge_start = term_w.saturating_sub(agent_w + 16);
+                    let sats_badge_len: u16 = if !app.agent_panel_visible && !app.agents.is_empty()
+                    {
+                        if app.agents.len() < 10 {
+                            3
+                        } else {
+                            4
+                        }
+                    } else {
+                        0
+                    };
+                    let badge_start = term_w.saturating_sub(agent_w + 16 + sats_badge_len);
                     let badge_end = term_w.saturating_sub(agent_w);
                     if mouse.column >= badge_start && mouse.column < badge_end {
                         hovered = Some(app.tabs.len() + 1);
