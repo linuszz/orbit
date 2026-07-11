@@ -101,9 +101,9 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
             width = (w as usize).saturating_sub(1)
         );
         let (cwd_bg, cwd_fg) = if is_active {
-            (BG_CARD, FG_SECONDARY)
+            (ACCENT, BG_PRIMARY)
         } else if is_hovered {
-            (BG_TERTIARY, FG_SECONDARY)
+            (ACCENT_HOVER, FG_SECONDARY)
         } else {
             (BG_SECONDARY, FG_MUTED)
         };
@@ -130,9 +130,9 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         let stats_raw = format!(" {} {}t {}p", status_sym, space.tab_count, space.pane_count);
         let stats_text = format!("{:<width$}", stats_raw, width = w as usize);
         let (stats_bg, stats_fg) = if is_active {
-            (BG_CARD, FG_MUTED)
+            (ACCENT, BG_PRIMARY)
         } else if is_hovered {
-            (BG_TERTIARY, FG_MUTED)
+            (ACCENT_HOVER, FG_MUTED)
         } else {
             (BG_SECONDARY, FG_MUTED)
         };
@@ -167,10 +167,16 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
 
     // [+] New Space button
     if y < area.y + area.height {
+        let n = app.spaces.len();
+        let (new_space_fg, new_space_bg) = if app.sidebar_hovered == Some(n) {
+            (FG_PRIMARY, ACCENT_HOVER)
+        } else {
+            (FG_MUTED, BG_CARD)
+        };
         frame.render_widget(
             Paragraph::new(Span::styled(
                 format!("{:<width$}", " [+] New Space", width = w as usize),
-                Style::default().fg(ACCENT).bg(BG_CARD),
+                Style::default().fg(new_space_fg).bg(new_space_bg),
             )),
             Rect {
                 x,
@@ -182,12 +188,18 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         y += 1;
     }
 
-    // Flight Deck button
+    // Command button
     if y < area.y + area.height {
+        let n = app.spaces.len();
+        let (cmd_fg, cmd_bg) = if app.sidebar_hovered == Some(n + 1) {
+            (FG_PRIMARY, ACCENT_HOVER)
+        } else {
+            (FG_MUTED, BG_CARD)
+        };
         frame.render_widget(
             Paragraph::new(Span::styled(
-                format!("{:<width$}", " \u{2261}  Flight Deck", width = w as usize),
-                Style::default().fg(FG_MUTED).bg(BG_CARD),
+                format!("{:<width$}", " \u{2261}  Command", width = w as usize),
+                Style::default().fg(cmd_fg).bg(cmd_bg),
             )),
             Rect {
                 x,

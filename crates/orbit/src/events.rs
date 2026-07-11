@@ -149,9 +149,11 @@ async fn execute_context_action(
         }
         "close_tab" => {
             if let ContextMenuTarget::Tab(tab_id) = target {
-                let _ = writer
-                    .send(ClientMessage::CloseTab { tab_id: *tab_id })
-                    .await;
+                if app.tabs.len() > 1 {
+                    let _ = writer
+                        .send(ClientMessage::CloseTab { tab_id: *tab_id })
+                        .await;
+                }
             }
         }
         "split_h" => {
@@ -464,9 +466,7 @@ async fn handle_mouse(
                             && mouse.column >= menu.x
                             && mouse.column < menu.x + 24
                         {
-                            if let Some(ContextMenuItem::Action { id, .. }) =
-                                menu.items.get(menu.selected)
-                            {
+                            if let Some(ContextMenuItem::Action { id, .. }) = menu.items.get(i) {
                                 let id = *id;
                                 let target = menu.target.clone();
                                 app.context_menu = None;
@@ -662,11 +662,7 @@ async fn handle_mouse(
                 for tab in app.tabs.iter() {
                     let label_len = tab.name.len() as u16 + 2;
                     if mouse.column >= x && mouse.column < x + label_len {
-                        app.open_context_menu(
-                            mouse.column,
-                            mouse.row,
-                            ContextMenuTarget::Tab(tab.id),
-                        );
+                        app.open_context_menu(mouse.column, 1, ContextMenuTarget::Tab(tab.id));
                         return;
                     }
                     x += label_len;
@@ -789,6 +785,13 @@ async fn handle_mouse(
                 if hovered.is_none() && col < acc + 3 {
                     hovered = Some(app.tabs.len());
                 }
+                // Check [A] Satellites button (right-aligned, 16 chars wide)
+                if hovered.is_none() {
+                    let badge_start = term_w.saturating_sub(agent_w + 16);
+                    if mouse.column >= badge_start {
+                        hovered = Some(app.tabs.len() + 1);
+                    }
+                }
                 if app.tab_hovered != hovered {
                     app.tab_hovered = hovered;
                     app.needs_redraw = true;
@@ -810,6 +813,14 @@ async fn handle_mouse(
                     y += 3;
                     if i + 1 < app.spaces.len() {
                         y += 1;
+                    }
+                }
+                // Check button rows: [+] New Space then ≡ Command
+                if hovered.is_none() {
+                    if mouse.row == y {
+                        hovered = Some(app.spaces.len());
+                    } else if mouse.row == y + 1 {
+                        hovered = Some(app.spaces.len() + 1);
                     }
                 }
                 if app.sidebar_hovered != hovered {

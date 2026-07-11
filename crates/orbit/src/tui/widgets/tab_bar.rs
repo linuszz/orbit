@@ -49,6 +49,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Agent panel toggle — right-aligned
     let (agent_fg, agent_bg) = if app.agent_panel_visible {
         (BG_PRIMARY, ACCENT)
+    } else if app.tab_hovered == Some(app.tabs.len() + 1) {
+        (FG_PRIMARY, ACCENT_HOVER)
     } else {
         (FG_MUTED, BG_CARD)
     };
