@@ -27,6 +27,19 @@ pub struct Selection {
     pub active: bool,
 }
 
+/// Known agent types the user can launch from the Launch Satellite overlay.
+pub const LAUNCH_AGENTS: &[(&str, &str)] = &[
+    ("claude", "Claude Code"),
+    ("codex", "Codex (Copilot)"),
+    ("aider", "Aider"),
+];
+
+/// State for the "Launch Satellite" agent picker overlay.
+#[derive(Debug, Clone)]
+pub struct LaunchModalState {
+    pub selected: usize,
+}
+
 /// State for the Satellite Eclipse intervention modal.
 #[derive(Debug, Clone)]
 pub struct EclipseModalState {
@@ -201,6 +214,7 @@ pub struct App {
     pub agent_hovered: Option<AgentHover>,
     pub agent_scroll_offset: usize,
     pub eclipse_modal: Option<EclipseModalState>,
+    pub launch_modal: Option<LaunchModalState>,
 }
 
 #[derive(Debug, Clone)]
@@ -330,6 +344,7 @@ impl App {
             agent_hovered: None,
             agent_scroll_offset: 0,
             eclipse_modal: None,
+            launch_modal: None,
         }
     }
 

@@ -3,7 +3,7 @@ use crossterm::event::{
     Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
 };
 use futures::StreamExt;
-use orbit_protocol::{AgentLaunchRequest, ClientMessage, SplitDir};
+use orbit_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
 
 use crate::app::{AgentHover, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
@@ -271,6 +271,12 @@ async fn handle_eclipse_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
 }
 
 async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
+    // Launch modal captures all keyboard input when open.
+    if app.launch_modal.is_some() {
+        handle_launch_key(key, app, writer).await;
+        return;
+    }
+
     // Eclipse modal captures all keyboard input when open.
     if app.eclipse_modal.is_some() {
         handle_eclipse_key(key, app, writer).await;
@@ -495,6 +501,123 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
     Ok(())
 }
 
+async fn do_launch(app: &mut App, writer: &IpcWriter) {
+    let Some(modal) = &app.launch_modal else {
+        return;
+    };
+    let name = crate::app::LAUNCH_AGENTS
+        .get(modal.selected)
+        .map(|(cmd, _)| cmd.to_string())
+        .unwrap_or_else(|| "claude".to_string());
+    let space_id = app
+        .spaces
+        .get(app.active_space_idx)
+        .map(|s| s.space_id)
+        .unwrap_or_default();
+    app.launch_modal = None;
+    let _ = writer
+        .send(ClientMessage::AgentLaunch {
+            config: orbit_protocol::AgentLaunchRequest {
+                name,
+                model: String::new(),
+                cwd: app.space_path.clone(),
+                space_id,
+            },
+        })
+        .await;
+    app.needs_redraw = true;
+}
+
+async fn handle_launch_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
+    let Some(modal) = &app.launch_modal else {
+        return;
+    };
+    let n = crate::app::LAUNCH_AGENTS.len();
+    match key.code {
+        KeyCode::Esc => {
+            app.launch_modal = None;
+            app.needs_redraw = true;
+        }
+        KeyCode::Enter => {
+            do_launch(app, writer).await;
+        }
+        KeyCode::Up => {
+            let sel = modal.selected;
+            if let Some(m) = &mut app.launch_modal {
+                m.selected = if sel == 0 { n - 1 } else { sel - 1 };
+            }
+            app.needs_redraw = true;
+        }
+        KeyCode::Down => {
+            let sel = modal.selected;
+            if let Some(m) = &mut app.launch_modal {
+                m.selected = (sel + 1) % n;
+            }
+            app.needs_redraw = true;
+        }
+        _ => {}
+    }
+}
+
+async fn handle_launch_modal_mouse(
+    mouse: crossterm::event::MouseEvent,
+    app: &mut App,
+    writer: &IpcWriter,
+    term_size: ratatui::layout::Rect,
+) {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return;
+    }
+    let Some(_modal) = &app.launch_modal else {
+        return;
+    };
+    // Mirror geometry from launch_modal::render.
+    let n = crate::app::LAUNCH_AGENTS.len() as u16;
+    let modal_h = (n + 6).min(term_size.height.saturating_sub(4));
+    let modal_w = crate::tui::widgets::launch_modal::MODAL_W.min(term_size.width.saturating_sub(4));
+    let modal_x = (term_size.width.saturating_sub(modal_w)) / 2;
+    let modal_y = (term_size.height.saturating_sub(modal_h)) / 2;
+
+    // Dismiss on click outside.
+    if mouse.column < modal_x
+        || mouse.column >= modal_x + modal_w
+        || mouse.row < modal_y
+        || mouse.row >= modal_y + modal_h
+    {
+        app.launch_modal = None;
+        app.needs_redraw = true;
+        return;
+    }
+
+    let inner_x = modal_x + 1;
+    // Agent rows start at modal_y+3 (border + blank + "Agent:" label).
+    let agents_start = modal_y + 3;
+    let agents_end = agents_start + n;
+    let btn_row = modal_y + modal_h.saturating_sub(2);
+
+    if mouse.row >= agents_start && mouse.row < agents_end {
+        // Click on an agent row — select and launch immediately.
+        let idx = (mouse.row - agents_start) as usize;
+        if let Some(m) = &mut app.launch_modal {
+            m.selected = idx;
+        }
+        do_launch(app, writer).await;
+        return;
+    }
+
+    if mouse.row == btn_row {
+        let col_in = mouse.column.saturating_sub(inner_x);
+        if (1..=8).contains(&col_in) {
+            // [Launch]
+            do_launch(app, writer).await;
+        } else if (11..=18).contains(&col_in) {
+            // [Cancel]
+            app.launch_modal = None;
+            app.needs_redraw = true;
+        }
+    }
+}
+
 async fn handle_eclipse_modal_mouse(
     mouse: crossterm::event::MouseEvent,
     app: &mut App,
@@ -611,6 +734,12 @@ async fn handle_mouse(
             }
             _ => {}
         }
+        return;
+    }
+
+    // Launch modal is open — only forward clicks to modal.
+    if app.launch_modal.is_some() {
+        handle_launch_modal_mouse(mouse, app, writer, term_size).await;
         return;
     }
 
@@ -747,23 +876,8 @@ async fn handle_mouse(
                     if mouse.column >= term_w.saturating_sub(4)
                         && mouse.column <= term_w.saturating_sub(2)
                     {
-                        // [+] add — launch an agent in a new split pane
-                        let space_id = app
-                            .spaces
-                            .get(app.active_space_idx)
-                            .map(|s| s.space_id)
-                            .unwrap_or_default();
-                        let _ = writer
-                            .send(ClientMessage::AgentLaunch {
-                                config: AgentLaunchRequest {
-                                    name: "claude".to_string(),
-                                    model: String::new(),
-                                    cwd: app.space_path.clone(),
-                                    space_id,
-                                },
-                            })
-                            .await;
-                        app.needs_redraw = true;
+                        // [+] add — open the Launch Satellite picker overlay
+                        crate::tui::widgets::launch_modal::open(app);
                         return;
                     }
                 }

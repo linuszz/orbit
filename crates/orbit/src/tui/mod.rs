@@ -107,6 +107,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         widgets::command_palette::render(frame, area, app);
     }
 
+    if app.launch_modal.is_some() {
+        widgets::launch_modal::render(frame, area, app);
+    }
+
     if app.eclipse_modal.is_some() {
         widgets::eclipse_modal::render(frame, area, app);
     }
