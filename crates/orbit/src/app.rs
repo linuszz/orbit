@@ -758,7 +758,16 @@ impl App {
                 self.needs_redraw = true;
             }
             ServerEvent::AgentCreated(info) => {
-                self.agent_start_times.insert(info.id, Instant::now());
+                let duration_s = info.detail.as_ref().map(|d| d.duration_s).unwrap_or(0);
+                self.agent_start_times.insert(
+                    info.id,
+                    Instant::now() - std::time::Duration::from_secs(duration_s as u64),
+                );
+                if info.status == AgentStatus::Blocked {
+                    self.agent_blocked_times
+                        .entry(info.id)
+                        .or_insert_with(Instant::now);
+                }
                 self.agents.push(info.clone());
                 self.sort_agents();
                 self.agent_panel_visible = true;
