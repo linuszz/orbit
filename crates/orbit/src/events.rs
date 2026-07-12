@@ -506,13 +506,32 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                         }
                     }
                 }
-                // s: stop a working agent
+                // s: stop/abort a working or blocked agent
                 KeyCode::Char('s') => {
                     let sel = *selected;
                     if let Some(agent) = app.agents.get(sel) {
-                        if agent.status == orbit_protocol::AgentStatus::Working {
+                        if matches!(
+                            agent.status,
+                            orbit_protocol::AgentStatus::Working
+                                | orbit_protocol::AgentStatus::Blocked
+                        ) {
                             let agent_id = agent.id;
                             let _ = writer.send(ClientMessage::AgentAbort { agent_id }).await;
+                        }
+                    }
+                }
+                // d: dismiss (remove) idle/done/error agent from list
+                KeyCode::Char('d') => {
+                    let sel = *selected;
+                    if let Some(agent) = app.agents.get(sel) {
+                        if matches!(
+                            agent.status,
+                            orbit_protocol::AgentStatus::Idle
+                                | orbit_protocol::AgentStatus::Done
+                                | orbit_protocol::AgentStatus::Error
+                        ) {
+                            let agent_id = agent.id;
+                            let _ = writer.send(ClientMessage::AgentRemove { agent_id }).await;
                         }
                     }
                 }

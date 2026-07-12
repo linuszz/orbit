@@ -415,12 +415,26 @@ fn render_card(
         }
     };
 
-    // Row 0: icon + sel_mark + name (11 cols) + " " + status (7 cols) = 21
+    // Row 0: icon + sel_mark + name (left) + status + dur (right-aligned).
+    // Layout: icon(1) + mark(1) + name_padded + " " + right_part
+    // right_part = "{label} {dur}" or just "{label}" when duration=0.
     {
-        let name_w = (w.saturating_sub(2 + 1 + 7)) as usize; // icon+mark + sp + status
+        let duration_s = app
+            .agent_start_times
+            .get(&agent.id)
+            .map(|t| t.elapsed().as_secs() as u32)
+            .or_else(|| agent.detail.as_ref().map(|d| d.duration_s))
+            .unwrap_or(0);
+        let right_part = if duration_s > 0 {
+            format!("{} {}", label, format_duration(duration_s))
+        } else {
+            label.to_string()
+        };
+        // name fills the space between icon+mark(2) and " "+right_part.
+        let right_len = (1 + right_part.len()) as u16; // leading space + right_part
+        let name_w = w.saturating_sub(2 + right_len) as usize;
         let name = truncate_str(&agent.name, name_w);
         let name_padded = format!("{:<width$}", name, width = name_w);
-        let status_padded = format!("{:>7}", label);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(icon, Style::default().fg(sc).bg(card_bg)),
@@ -433,7 +447,7 @@ fn render_card(
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" ", Style::default().bg(card_bg)),
-                Span::styled(status_padded, Style::default().fg(sc).bg(card_bg)),
+                Span::styled(right_part, Style::default().fg(sc).bg(card_bg)),
             ])),
             Rect {
                 x,
@@ -444,22 +458,10 @@ fn render_card(
         );
     }
 
-    // Row 1: " {cwd_short} · {model}  {rss} {dur}" — cwd basename left, metrics right.
+    // Row 1: sel_mark + "cwd · model" (left) + rss (right).
     {
-        // Live duration from client-side start time; falls back to detail.duration_s.
-        let duration_s = app
-            .agent_start_times
-            .get(&agent.id)
-            .map(|t| t.elapsed().as_secs() as u32)
-            .or_else(|| agent.detail.as_ref().map(|d| d.duration_s))
-            .unwrap_or(0);
-        let dur_str = if duration_s > 0 {
-            format_duration(duration_s)
-        } else {
-            String::new()
-        };
         let rss_str = metrics.and_then(|m| m.rss_kb).map(format_rss);
-        let inner_w = w.saturating_sub(1) as usize; // 1 leading space
+        let inner_w = w.saturating_sub(1) as usize; // sel_mark takes col 0
 
         // Short cwd: basename of the space's working directory.
         let cwd_short = app
@@ -473,14 +475,6 @@ fn render_card(
                     .map(str::to_string)
             });
 
-        // right = "rss dur" or just "dur"
-        let right = match (&rss_str, dur_str.is_empty()) {
-            (Some(rss), false) => format!("{} {}", rss, dur_str),
-            (Some(rss), true) => rss.clone(),
-            (None, false) => dur_str.clone(),
-            (None, true) => String::new(),
-        };
-
         // left = "cwd · model" — omit separator when model is empty.
         let left_content = match (&cwd_short, agent.model.is_empty()) {
             (Some(cwd), false) if !cwd.is_empty() => {
@@ -490,6 +484,7 @@ fn render_card(
             (_, false) => agent.model.clone(),
             _ => String::new(),
         };
+        let right = rss_str.unwrap_or_default();
         let left_max = if right.is_empty() {
             inner_w
         } else {
