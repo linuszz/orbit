@@ -159,11 +159,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // --- Header ---
     {
         let n = app.agents.len();
-        let badge = if app.agent_scroll_offset > 0 {
-            format!("[{}/{}]", n.saturating_sub(app.agent_scroll_offset), n)
-        } else {
-            format!("[{}]", n)
-        };
+        let badge = format!("[{}]", n);
         // Badge pulses with smooth Blocked animation when any agent is blocked.
         let badge_color = if any_blocked {
             blocked_pulse_color(app.tick_count)

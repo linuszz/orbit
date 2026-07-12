@@ -1319,7 +1319,9 @@ async fn handle_mouse(
             if mouse.row == 0 {
                 return;
             }
-            if app.sidebar_visible && mouse.column < sidebar_w {
+            if agent_w > 0 && mouse.column >= term_w.saturating_sub(agent_w) {
+                // Right-click inside the agent panel — no context menu for agent cards yet.
+            } else if app.sidebar_visible && mouse.column < sidebar_w {
                 if mouse.row >= 2 {
                     app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Space);
                 } else {
@@ -1414,9 +1416,9 @@ async fn handle_mouse(
                 } else {
                     0
                 };
-                let above_row: u16 = if app.agent_scroll_offset > 0 { 1 } else { 0 };
-                let visible =
-                    ((term_h.saturating_sub(5 + banner_rows + above_row)) / 6).max(1) as usize;
+                // Use above_row=1 for max_scroll ceiling: after any scroll the "N above"
+                // indicator will be present, consuming one row.
+                let visible = ((term_h.saturating_sub(5 + banner_rows + 1)) / 6).max(1) as usize;
                 let max_scroll = app.agents.len().saturating_sub(visible);
                 app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max_scroll);
                 app.needs_redraw = true;
