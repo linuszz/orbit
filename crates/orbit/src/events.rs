@@ -517,9 +517,15 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                 KeyCode::Char('r') => {
                     let sel = *selected;
                     if let Some(agent) = app.agents.get(sel) {
-                        if agent.status == orbit_protocol::AgentStatus::Blocked {
-                            let agent_id = agent.id;
-                            crate::tui::widgets::eclipse_modal::open(app, agent_id);
+                        let agent_id = agent.id;
+                        match agent.status {
+                            orbit_protocol::AgentStatus::Blocked => {
+                                crate::tui::widgets::eclipse_modal::open(app, agent_id);
+                            }
+                            orbit_protocol::AgentStatus::Error => {
+                                let _ = writer.send(ClientMessage::AgentRestart { agent_id }).await;
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -1201,25 +1207,10 @@ async fn handle_mouse(
                                     let _ =
                                         writer.send(ClientMessage::AgentRemove { agent_id }).await;
                                 }
-                                // Slot 1: [Rstr] (Error) — focus pane to inspect
+                                // Slot 1: [Rstr] (Error) — reset agent to Idle
                                 (1, orbit_protocol::AgentStatus::Error) => {
-                                    if let Some(pane_id) = agent_pane {
-                                        let found =
-                                            app.tabs.iter().enumerate().find(|(_, t)| {
-                                                t.pane_tree.leaves().contains(&pane_id)
-                                            });
-                                        let tab_id =
-                                            found.map(|(_, t)| t.id).unwrap_or(app.active_tab_id);
-                                        let tab_idx =
-                                            found.map(|(i, _)| i).unwrap_or(app.active_tab);
-                                        app.active_pane = pane_id;
-                                        app.active_tab = tab_idx;
-                                        app.active_tab_id = tab_id;
-                                        app.selection = None;
-                                        let _ = writer
-                                            .send(ClientMessage::FocusPane { tab_id, pane_id })
-                                            .await;
-                                    }
+                                    let _ =
+                                        writer.send(ClientMessage::AgentRestart { agent_id }).await;
                                 }
                                 // Slot 2: [Rmov] (Error) — dismiss from list
                                 (2, orbit_protocol::AgentStatus::Error) => {

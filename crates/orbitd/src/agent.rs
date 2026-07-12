@@ -99,6 +99,21 @@ impl AgentRegistry {
         debug!("agent removed by user: id={agent_id:?}");
     }
 
+    /// Clear an Error-state agent back to Idle so it can be re-detected.
+    pub async fn restart_agent(&self, agent_id: AgentId) {
+        let mut agents = self.agents.write().await;
+        if let Some(agent) = agents.iter_mut().find(|a| a.id == agent_id) {
+            agent.status = AgentStatus::Idle;
+            agent.detail = None;
+            let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
+                agent_id,
+                new_status: AgentStatus::Idle,
+                detail: None,
+            });
+            debug!("agent restarted (reset to Idle): id={agent_id:?}");
+        }
+    }
+
     /// Kill the agent process with SIGTERM.
     pub async fn abort_agent(&self, agent_id: AgentId) {
         let pid = {

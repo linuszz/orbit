@@ -133,6 +133,9 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
                     ClientMessage::AgentAbort { agent_id } => {
                         space_manager.agent_registry.abort_agent(agent_id).await;
                     }
+                    ClientMessage::AgentRestart { agent_id } => {
+                        space_manager.agent_registry.restart_agent(agent_id).await;
+                    }
                     ClientMessage::AgentRemove { agent_id } => {
                         space_manager.agent_registry.remove_agent(agent_id).await;
                     }

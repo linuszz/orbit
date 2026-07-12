@@ -80,6 +80,9 @@ pub enum ClientMessage {
     AgentAbort {
         agent_id: crate::AgentId,
     },
+    AgentRestart {
+        agent_id: crate::AgentId,
+    },
     AgentLaunch {
         config: crate::AgentLaunchRequest,
     },
