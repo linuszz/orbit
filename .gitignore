@@ -12,3 +12,4 @@
 *~
 
 # Note: Cargo.lock IS tracked in git — this is an application project, not a library.
+core.*
