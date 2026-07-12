@@ -412,6 +412,13 @@ impl App {
 
     /// Sort agents: Blocked first, then Working, then Error, then Idle/Done.
     pub fn sort_agents(&mut self) {
+        // Save the currently-selected agent's ID so the cursor follows it through the sort.
+        let selected_id = if let InputMode::AgentPanel { selected } = self.mode {
+            self.agents.get(selected).map(|a| a.id)
+        } else {
+            None
+        };
+
         let order_before: Vec<AgentId> = self.agents.iter().map(|a| a.id).collect();
         self.agents.sort_by_key(|a| match a.status {
             AgentStatus::Blocked => 0u8,
@@ -420,10 +427,18 @@ impl App {
             AgentStatus::Idle => 3,
             AgentStatus::Done => 4,
         });
-        // Only reset hover if card positions actually changed; avoids 5-second hover flicker.
+        // Only reset hover if card positions actually changed; avoids hover flicker.
         let order_after: Vec<AgentId> = self.agents.iter().map(|a| a.id).collect();
         if order_before != order_after {
             self.agent_hovered = None;
+            // Repoint `selected` to the same agent at its new position.
+            if let (InputMode::AgentPanel { selected }, Some(id)) = (&mut self.mode, selected_id) {
+                if let Some(new_pos) = self.agents.iter().position(|a| a.id == id) {
+                    *selected = new_pos;
+                    // Keep scroll clamped so the selected card stays on-screen.
+                    self.agent_scroll_offset = self.agent_scroll_offset.min(new_pos);
+                }
+            }
         }
     }
 

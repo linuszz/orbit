@@ -500,7 +500,30 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                 }
                 KeyCode::Tab => {
                     if n > 0 {
+                        let old = *selected;
                         *selected = (*selected + 1) % n;
+                        if *selected < old {
+                            // Wrapped to first agent — scroll to top.
+                            app.agent_scroll_offset = 0;
+                        } else {
+                            // Moved forward — same visible-window logic as Down.
+                            let banner_rows: u16 = if app
+                                .agents
+                                .iter()
+                                .any(|a| a.status == orbit_protocol::AgentStatus::Blocked)
+                            {
+                                2
+                            } else {
+                                0
+                            };
+                            let above_row: u16 = if app.agent_scroll_offset > 0 { 1 } else { 0 };
+                            let visible = ((term_h.saturating_sub(5 + banner_rows + above_row)) / 6)
+                                .max(1) as usize;
+                            if *selected >= app.agent_scroll_offset + visible {
+                                app.agent_scroll_offset =
+                                    selected.saturating_sub(visible.saturating_sub(1));
+                            }
+                        }
                     }
                 }
                 KeyCode::Enter => {
