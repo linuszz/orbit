@@ -50,7 +50,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
-            " \u{2191}\u{2193}:nav Enter:view r:respond s:stop d:dismiss q:exit",
+            " \u{2191}\u{2193}:nav Enter:view r:respond/rstr s:stop d:dismiss q:exit",
             Style::default().fg(FG_MUTED),
         ));
         spans.push(Span::styled(" | ", Style::default().fg(BORDER)));

@@ -75,7 +75,7 @@ fn content_area(term_size: ratatui::layout::Rect, app: &App) -> ratatui::layout:
     }
 }
 
-async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
+async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u16) {
     match id {
         "split_h" => {
             app.pending_split = Some((app.active_pane, SplitDir::Horizontal));
@@ -143,6 +143,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
                 app.mode = InputMode::AgentPanel { selected: sel };
             } else {
                 app.mode = InputMode::Normal;
+                app.agent_hovered = None;
             }
         }
         "agent_scroll_up" => {
@@ -152,7 +153,19 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter) {
         }
         "agent_scroll_down" => {
             if app.agent_panel_visible {
-                let max = app.agents.len().saturating_sub(1);
+                let banner_rows: u16 = if app
+                    .agents
+                    .iter()
+                    .any(|a| a.status == orbit_protocol::AgentStatus::Blocked)
+                {
+                    2
+                } else {
+                    0
+                };
+                let above_row: u16 = if app.agent_scroll_offset > 0 { 1 } else { 0 };
+                let visible =
+                    ((term_h.saturating_sub(5 + banner_rows + above_row)) / 6).max(1) as usize;
+                let max = app.agents.len().saturating_sub(visible);
                 app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max);
             }
         }
@@ -383,7 +396,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                     if let Some(&cmd_idx) = filtered.get(*selected) {
                         let cmd_id = COMMANDS[cmd_idx].id;
                         app.mode = InputMode::Normal;
-                        execute_command(cmd_id, app, writer).await;
+                        execute_command(cmd_id, app, writer, term_h).await;
                         return;
                     }
                 }
@@ -399,7 +412,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                         .flatten();
                     if let Some(cmd) = shortcut_cmd {
                         app.mode = InputMode::Normal;
-                        execute_command(cmd.id, app, writer).await;
+                        execute_command(cmd.id, app, writer, term_h).await;
                         return;
                     }
                     search.push(c);
@@ -1058,6 +1071,7 @@ async fn handle_mouse(
                         // × close button
                         app.agent_panel_visible = false;
                         app.mode = InputMode::Normal;
+                        app.agent_hovered = None;
                         app.needs_redraw = true;
                         return;
                     }
