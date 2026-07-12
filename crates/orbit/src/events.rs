@@ -607,6 +607,41 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
     }
 }
 
+async fn send_pane_resizes(app: &mut App, writer: &IpcWriter, term_cols: u16, term_rows: u16) {
+    let sidebar_w: u16 = if term_cols < 80 {
+        SIDEBAR_COLLAPSED_W
+    } else if app.sidebar_visible {
+        SIDEBAR_W
+    } else {
+        SIDEBAR_COLLAPSED_W
+    };
+    let agent_w = agent_panel_width(term_cols, app.agent_panel_visible);
+    let total_cols = term_cols.saturating_sub(sidebar_w + agent_w).max(20);
+    let total_rows = term_rows.saturating_sub(2).max(5);
+    let pane_area = ratatui::layout::Rect {
+        x: sidebar_w,
+        y: 1,
+        width: total_cols,
+        height: total_rows,
+    };
+    let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+    for (pid, rect) in areas {
+        let pc = rect.width.saturating_sub(2);
+        let pr = rect.height.saturating_sub(2);
+        if let Some(pane) = app.panes.get_mut(&pid) {
+            pane.parser.grid.resize(pc.max(1), pr.max(1));
+        }
+        let _ = writer
+            .send(ClientMessage::ResizePane {
+                tab_id: app.active_tab_id,
+                pane_id: pid,
+                cols: pc,
+                rows: pr,
+            })
+            .await;
+    }
+}
+
 pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) -> Result<()> {
     let (writer, mut reader) = ipc.into_split();
     let mut event_stream = EventStream::new();
@@ -617,6 +652,12 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
         if app.needs_redraw {
             terminal.draw(|frame| render(frame, app))?;
             app.needs_redraw = false;
+        }
+
+        if app.needs_resize {
+            app.needs_resize = false;
+            let term_size = terminal.size().unwrap_or_default();
+            send_pane_resizes(app, &writer, term_size.width, term_size.height).await;
         }
 
         if app.should_quit {
@@ -652,31 +693,7 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                         handle_key(key, app, &writer, term_h).await;
                     }
                     Some(Ok(Event::Resize(cols, rows))) => {
-                        let sidebar_w: u16 = if app.sidebar_visible { SIDEBAR_W } else { SIDEBAR_COLLAPSED_W };
-                        let total_cols = cols.saturating_sub(sidebar_w).max(20);
-                        let total_rows = rows.saturating_sub(3).max(5);
-                        let pane_area = ratatui::layout::Rect {
-                            x: 0,
-                            y: 0,
-                            width: total_cols,
-                            height: total_rows,
-                        };
-                        let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
-                        for (pid, rect) in areas {
-                            let pc = rect.width;
-                            let pr = rect.height.saturating_sub(2);
-                            if let Some(pane) = app.panes.get_mut(&pid) {
-                                pane.parser.grid.resize(pc, pr);
-                            }
-                            let _ = writer
-                                .send(ClientMessage::ResizePane {
-                                    tab_id: app.active_tab_id,
-                                    pane_id: pid,
-                                    cols: pc,
-                                    rows: pr,
-                                })
-                                .await;
-                        }
+                        send_pane_resizes(app, &writer, cols, rows).await;
                         app.needs_redraw = true;
                     }
                     Some(Ok(Event::Mouse(mouse))) => {
@@ -882,14 +899,28 @@ async fn handle_mouse(
     term_size: ratatui::layout::Rect,
 ) {
     if let Some(menu) = app.context_menu.clone() {
+        let menu_w: u16 = menu
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                ContextMenuItem::Action {
+                    label, shortcut, ..
+                } => Some(label.len() + shortcut.len() + 2),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(16) as u16
+            + 4;
+        // Items are rendered at menu_area.y + 1 + i (border offset)
+        let menu_y = menu.y;
+
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                let menu_y = menu.y;
                 for (i, item) in menu.items.iter().enumerate() {
                     if let ContextMenuItem::Action { .. } = item {
-                        if mouse.row == menu_y + i as u16
+                        if mouse.row == menu_y + 1 + i as u16
                             && mouse.column >= menu.x
-                            && mouse.column < menu.x + 24
+                            && mouse.column < menu.x + menu_w
                         {
                             if let Some(ContextMenuItem::Action { id, .. }) = menu.items.get(i) {
                                 let id = *id;
@@ -908,12 +939,11 @@ async fn handle_mouse(
                 app.close_context_menu();
             }
             MouseEventKind::Moved => {
-                let menu_y = menu.y;
                 let mut new_selected = 0;
                 for (i, item) in menu.items.iter().enumerate() {
-                    if mouse.row == menu_y + i as u16
+                    if mouse.row == menu_y + 1 + i as u16
                         && mouse.column >= menu.x
-                        && mouse.column < menu.x + 24
+                        && mouse.column < menu.x + menu_w
                     {
                         if let ContextMenuItem::Action { .. } = item {
                             new_selected = i;

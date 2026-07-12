@@ -98,14 +98,25 @@ fn status_label(status: &AgentStatus) -> &'static str {
     }
 }
 
-// Returns ([btn_label, is_danger]; 3 slots, each label exactly 6 chars)
-fn card_buttons(status: &AgentStatus) -> [(&'static str, bool); 3] {
-    match status {
-        AgentStatus::Working => [("[View]", false), ("[Stop]", false), ("[Chat]", false)],
-        AgentStatus::Idle => [("[View]", false), ("[Chat]", false), ("[Rmov]", true)],
-        AgentStatus::Blocked => [("[View]", false), ("[Resp]", false), ("[Abrt]", true)],
-        AgentStatus::Error => [("[View]", false), ("[Rstr]", false), ("[Rmov]", true)],
-        AgentStatus::Done => [("[View]", false), ("[Chat]", false), ("[Rmov]", true)],
+// Returns ([btn_label, is_danger]; 3 slots).
+// `wide` selects full labels (panel >= 25 cols / inner >= 24) vs compact (inner < 24).
+fn card_buttons(status: &AgentStatus, wide: bool) -> [(&'static str, bool); 3] {
+    if wide {
+        match status {
+            AgentStatus::Working => [("[View]", false), ("[Stop]", false), ("[Chat]", false)],
+            AgentStatus::Idle => [("[View]", false), ("[Chat]", false), ("[Remove]", true)],
+            AgentStatus::Blocked => [("[View]", false), ("[Respond]", false), ("[Abort]", true)],
+            AgentStatus::Error => [("[View]", false), ("[Restart]", false), ("[Remove]", true)],
+            AgentStatus::Done => [("[View]", false), ("[Chat]", false), ("[Remove]", true)],
+        }
+    } else {
+        match status {
+            AgentStatus::Working => [("[View]", false), ("[Stop]", false), ("[Chat]", false)],
+            AgentStatus::Idle => [("[View]", false), ("[Chat]", false), ("[Rmov]", true)],
+            AgentStatus::Blocked => [("[View]", false), ("[Resp]", false), ("[Abrt]", true)],
+            AgentStatus::Error => [("[View]", false), ("[Rstr]", false), ("[Rmov]", true)],
+            AgentStatus::Done => [("[View]", false), ("[Chat]", false), ("[Rmov]", true)],
+        }
     }
 }
 
@@ -643,7 +654,7 @@ fn render_card(
 
     // Row 4: sel_mark + [Btn1] + " " + [Btn2] + " " + [Btn3] = 1+6+1+6+1+6 = 21
     {
-        let buttons = card_buttons(&agent.status);
+        let buttons = card_buttons(&agent.status, w >= 24);
         let mut spans = vec![sel_mark];
         for (slot, (btn_label, is_danger)) in buttons.iter().enumerate() {
             if slot > 0 {

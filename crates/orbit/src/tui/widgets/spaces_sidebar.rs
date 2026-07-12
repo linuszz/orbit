@@ -191,7 +191,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             stats_fg
         };
-        let total_len = base_stats.len() + agent_badge.len();
+        let total_len = base_stats.chars().count() + agent_badge.chars().count();
         let pad = (w as usize).saturating_sub(total_len);
         let pad_str = " ".repeat(pad);
         frame.render_widget(

@@ -226,6 +226,7 @@ pub struct App {
     pub mode: InputMode,
     pub should_quit: bool,
     pub needs_redraw: bool,
+    pub needs_resize: bool,
     pub server_connected: bool,
     pub sidebar_visible: bool,
     pub agent_panel_visible: bool,
@@ -357,6 +358,7 @@ impl App {
             mode: InputMode::Normal,
             should_quit: false,
             needs_redraw: true,
+            needs_resize: false,
             server_connected: true,
             sidebar_visible: true,
             agent_panel_visible: false,
@@ -757,6 +759,7 @@ impl App {
                     self.should_quit = true;
                 }
                 self.needs_redraw = true;
+                self.needs_resize = true;
             }
             ServerEvent::SpaceCreated(info) => {
                 self.spaces.push(SpaceEntry {

@@ -50,7 +50,7 @@ pub fn term_color(c: &TermColor) -> Color {
     }
 }
 
-pub const SIDEBAR_W: u16 = 20;
+pub const SIDEBAR_W: u16 = 24;
 pub const SIDEBAR_COLLAPSED_W: u16 = 2;
 
 /// §6.7 responsive agent panel width:
@@ -87,6 +87,16 @@ pub fn render(frame: &mut Frame, app: &App) {
     .split(area);
 
     widgets::spaces_sidebar::render(frame, cols[0], app);
+
+    if app.sidebar_visible && area.width >= 80 {
+        let sep_x = cols[0].x + cols[0].width - 1;
+        for row in cols[0].y..cols[0].y + cols[0].height {
+            if let Some(cell) = frame.buffer_mut().cell_mut((sep_x, row)) {
+                cell.set_char('\u{2502}')
+                    .set_style(Style::default().fg(BORDER));
+            }
+        }
+    }
 
     let right = Rect {
         x: cols[1].x,
