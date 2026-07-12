@@ -141,6 +141,9 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
                     0
                 };
                 app.mode = InputMode::AgentPanel { selected: sel };
+                // Clamp scroll so the selected card is always on-screen.
+                // (scroll_offset may be > sel if commands were issued while in Normal mode.)
+                app.agent_scroll_offset = app.agent_scroll_offset.min(sel);
             } else {
                 app.mode = InputMode::Normal;
                 app.agent_hovered = None;
