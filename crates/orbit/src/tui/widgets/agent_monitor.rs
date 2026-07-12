@@ -247,9 +247,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         };
         // Eclipse icon pulses with smooth Blocked animation (48-tick / ~0.8 s cycle).
         let icon_color = blocked_pulse_color(app.tick_count);
+        // " Eclipse — {name}" — spec §3.1 format (em dash U+2014)
+        let prefix = " Eclipse \u{2014} ";
+        let name_max = (iw as usize).saturating_sub(1 + prefix.len());
+        let name_trunc = truncate_str(&name_part, name_max.max(2));
+        let text_content = format!("{}{}", prefix, name_trunc);
         let text_part = format!(
             "{:<width$}",
-            format!(" Eclipse: {}", name_part),
+            text_content,
             width = iw.saturating_sub(1) as usize
         );
         frame.render_widget(
@@ -274,12 +279,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             (ACCENT_BLOCKED, BG_TERTIARY)
         };
-        let respond_fill = " ".repeat(iw.saturating_sub(11) as usize);
+        // Show block_msg preview to the left of [Respond] if available.
+        let block_preview = blocked_agents
+            .first()
+            .and_then(|a| a.detail.as_ref())
+            .and_then(|d| d.block_msg.as_deref())
+            .unwrap_or("");
+        // Layout: " {preview:<fill}[Respond]", fill = iw - 1 - 9
+        let fill = (iw as usize).saturating_sub(10);
+        let preview_trunc = truncate_str(block_preview, fill);
+        let preview_padded = format!("{:<fill$}", preview_trunc, fill = fill);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" ", Style::default().bg(BG_TERTIARY)),
+                Span::styled(
+                    format!(" {}", preview_padded),
+                    Style::default().fg(FG_MUTED).bg(BG_TERTIARY),
+                ),
                 Span::styled("[Respond]", Style::default().fg(resp_fg).bg(resp_bg)),
-                Span::styled(respond_fill, Style::default().bg(BG_TERTIARY)),
             ])),
             Rect {
                 x: ix,
