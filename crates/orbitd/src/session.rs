@@ -309,7 +309,8 @@ impl SessionState {
 
     pub async fn new_tab(&self, name: Option<String>) -> anyhow::Result<TabId> {
         let new_id = TabId(self.next_tab_id.fetch_add(1, Ordering::Relaxed));
-        let name = name.unwrap_or_else(|| format!("tab{}", new_id.0));
+        let tab_count = self.tab_order.read().await.len();
+        let name = name.unwrap_or_else(|| format!("tab{}", tab_count));
         let pane_id = PaneId(self.next_pane_id.fetch_add(1, Ordering::Relaxed));
 
         let (cols, rows) = {
@@ -419,6 +420,36 @@ impl SessionState {
         {
             let mut active = self.active_tab.write().await;
             *active = tab_id;
+        }
+        let _ = self
+            .event_bus
+            .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
+    }
+
+    pub async fn reorder_tab(&self, tab_id: TabId, to_index: usize) {
+        {
+            let mut order = self.tab_order.write().await;
+            if let Some(from) = order.iter().position(|&id| id == tab_id) {
+                let to = to_index.min(order.len().saturating_sub(1));
+                if from != to {
+                    order.remove(from);
+                    order.insert(to, tab_id);
+                }
+            }
+        }
+        let _ = self
+            .event_bus
+            .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
+    }
+
+    pub async fn resize_split(&self, _tab_id: TabId, first_pane: PaneId, ratio: f32) {
+        {
+            let mut tabs = self.tabs.write().await;
+            for tab in tabs.values_mut() {
+                if tab.layout.set_split_ratio(first_pane, ratio) {
+                    break;
+                }
+            }
         }
         let _ = self
             .event_bus

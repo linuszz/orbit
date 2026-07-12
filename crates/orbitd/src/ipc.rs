@@ -106,6 +106,14 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
                         let session = space_manager.active_session().await;
                         session.switch_tab(tab_id).await;
                     }
+                    ClientMessage::ReorderTab { tab_id, to_index } => {
+                        let session = space_manager.active_session().await;
+                        session.reorder_tab(tab_id, to_index).await;
+                    }
+                    ClientMessage::ResizeSplit { tab_id, first_pane, ratio } => {
+                        let session = space_manager.active_session().await;
+                        session.resize_split(tab_id, first_pane, ratio).await;
+                    }
                     ClientMessage::RequestFullState => {
                         let s = space_manager.collect_full_state().await;
                         let _ = write_msg(&mut stream, &ServerEvent::Welcome {

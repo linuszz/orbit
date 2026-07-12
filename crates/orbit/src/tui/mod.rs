@@ -88,16 +88,6 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     widgets::spaces_sidebar::render(frame, cols[0], app);
 
-    if app.sidebar_visible && area.width >= 80 {
-        let sep_x = cols[0].x + cols[0].width - 1;
-        for row in cols[0].y..cols[0].y + cols[0].height {
-            if let Some(cell) = frame.buffer_mut().cell_mut((sep_x, row)) {
-                cell.set_char('\u{2502}')
-                    .set_style(Style::default().fg(BORDER));
-            }
-        }
-    }
-
     let right = Rect {
         x: cols[1].x,
         y: cols[1].y,
@@ -242,11 +232,53 @@ pub fn compute_leaf_areas(node: &PaneLayout, area: Rect) -> Vec<(PaneId, Rect)> 
             direction,
             first,
             second,
+            ratio,
         } => {
-            let (first_area, second_area) = split_area(area, direction);
+            let (first_area, second_area) = split_area(area, direction, *ratio);
             let mut v = compute_leaf_areas(first, first_area);
             v.extend(compute_leaf_areas(second, second_area));
             v
+        }
+    }
+}
+
+pub fn find_split_at_cursor(
+    node: &PaneLayout,
+    area: Rect,
+    col: u16,
+    row: u16,
+) -> Option<(PaneId, SplitDir)> {
+    match node {
+        PaneLayout::Leaf(_) => None,
+        PaneLayout::Split {
+            direction,
+            first,
+            second,
+            ratio,
+        } => {
+            let (first_area, second_area) = split_area(area, direction, *ratio);
+            let near = match direction {
+                SplitDir::Horizontal => {
+                    let bx = first_area.x + first_area.width;
+                    row >= area.y
+                        && row < area.y + area.height
+                        && col >= bx.saturating_sub(1)
+                        && col <= bx
+                }
+                SplitDir::Vertical => {
+                    let by = first_area.y + first_area.height;
+                    col >= area.x
+                        && col < area.x + area.width
+                        && row >= by.saturating_sub(1)
+                        && row <= by
+                }
+            };
+            if near {
+                first.leaves().first().map(|&pid| (pid, *direction))
+            } else {
+                find_split_at_cursor(first, first_area, col, row)
+                    .or_else(|| find_split_at_cursor(second, second_area, col, row))
+            }
         }
     }
 }
@@ -260,8 +292,9 @@ fn render_pane_tree(frame: &mut Frame, area: Rect, node: &PaneLayout, app: &App)
             direction,
             first,
             second,
+            ratio,
         } => {
-            let (first_area, second_area) = split_area(area, direction);
+            let (first_area, second_area) = split_area(area, direction, *ratio);
 
             render_pane_tree(frame, first_area, first, app);
             render_pane_tree(frame, second_area, second, app);
@@ -269,32 +302,33 @@ fn render_pane_tree(frame: &mut Frame, area: Rect, node: &PaneLayout, app: &App)
     }
 }
 
-fn split_area(area: Rect, dir: &SplitDir) -> (Rect, Rect) {
+fn split_area(area: Rect, dir: &SplitDir, ratio: f32) -> (Rect, Rect) {
+    let ratio = ratio.clamp(0.1, 0.9);
     match dir {
         SplitDir::Horizontal => {
             let total = area.width;
-            let half = total / 2;
+            let first_w = (total as f32 * ratio) as u16;
             let first = Rect {
-                width: half,
+                width: first_w,
                 ..area
             };
             let second = Rect {
-                x: area.x + half,
-                width: total - half,
+                x: area.x + first_w,
+                width: total - first_w,
                 ..area
             };
             (first, second)
         }
         SplitDir::Vertical => {
             let total = area.height;
-            let half = total / 2;
+            let first_h = (total as f32 * ratio) as u16;
             let first = Rect {
-                height: half,
+                height: first_h,
                 ..area
             };
             let second = Rect {
-                y: area.y + half,
-                height: total - half,
+                y: area.y + first_h,
+                height: total - first_h,
                 ..area
             };
             (first, second)

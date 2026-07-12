@@ -17,9 +17,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
-    let w = area.width;
+    let w = area.width.saturating_sub(1);
     let mut y = area.y;
     let x = area.x;
+    let sep_x = area.x + area.width - 1;
 
     // Header: « collapse button on the LEFT (cols 0-2), keeping it far from the tab bar edge.
     // This prevents accidental tab-bar clicks from triggering sidebar collapse.
@@ -271,6 +272,13 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
             height: 1,
         },
     );
+
+    for row in area.y..area.y + area.height {
+        if let Some(cell) = frame.buffer_mut().cell_mut((sep_x, row)) {
+            cell.set_char('\u{2502}')
+                .set_style(Style::default().fg(BORDER));
+        }
+    }
 }
 
 fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {

@@ -991,15 +991,13 @@ async fn handle_mouse(
                 if !app.sidebar_visible && mouse.column < SIDEBAR_COLLAPSED_W {
                     app.sidebar_visible = true;
                     app.needs_redraw = true;
-                    return;
-                }
-                // Handle « collapse button (left 3 cols of header, away from tab bar edge)
-                if app.sidebar_visible && mouse.column < 3 {
-                    app.sidebar_visible = false;
-                    app.needs_redraw = true;
+                    app.needs_resize = true;
                     return;
                 }
                 if app.sidebar_visible && mouse.column < sidebar_w {
+                    app.sidebar_visible = false;
+                    app.needs_redraw = true;
+                    app.needs_resize = true;
                     return;
                 }
                 let tab_x_start = sidebar_w;
@@ -1014,6 +1012,7 @@ async fn handle_mouse(
                             if let Some(&first) = app.pane_tree().leaves().first() {
                                 app.active_pane = first;
                             }
+                            app.drag_tab = Some(i);
                             app.needs_redraw = true;
                             return;
                         }
@@ -1321,6 +1320,16 @@ async fn handle_mouse(
             }
 
             let pane_area = content_area(term_size, app);
+            if let Some((first_pane, dir)) = crate::tui::find_split_at_cursor(
+                app.pane_tree(),
+                pane_area,
+                mouse.column,
+                mouse.row,
+            ) {
+                app.drag_split = Some((first_pane, dir));
+                app.selection = None;
+                return;
+            }
             let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
             for (pid, rect) in &areas {
                 if mouse.column >= rect.x
@@ -1411,7 +1420,27 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            // Update selection end during drag, clamping to pane inner area
+            if let Some((first_pane, _dir)) = app.drag_split {
+                let pane_area = content_area(term_size, app);
+                let ratio = match _dir {
+                    orbit_protocol::SplitDir::Horizontal => {
+                        let total = pane_area.width as f32;
+                        ((mouse.column as f32 - pane_area.x as f32) / total).clamp(0.1, 0.9)
+                    }
+                    orbit_protocol::SplitDir::Vertical => {
+                        let total = pane_area.height as f32;
+                        ((mouse.row as f32 - pane_area.y as f32) / total).clamp(0.1, 0.9)
+                    }
+                };
+                let _ = writer
+                    .send(ClientMessage::ResizeSplit {
+                        tab_id: app.active_tab_id,
+                        first_pane,
+                        ratio,
+                    })
+                    .await;
+                return;
+            }
             let drag_info = app
                 .selection
                 .as_ref()
@@ -1444,12 +1473,31 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {
+            app.drag_split = None;
             if let Some(sel) = &mut app.selection {
                 sel.active = false;
                 if sel.start == sel.end {
                     app.selection = None;
                 }
                 app.needs_redraw = true;
+            }
+            if let Some(from_idx) = app.drag_tab.take() {
+                if mouse.row == 0 && mouse.column >= sidebar_w {
+                    let mut x = sidebar_w;
+                    for (i, tab) in app.tabs.iter().enumerate() {
+                        let label_len = tab.name.len() as u16 + 2;
+                        if mouse.column >= x && mouse.column < x + label_len && i != from_idx {
+                            let _ = writer
+                                .send(ClientMessage::ReorderTab {
+                                    tab_id: app.tabs[from_idx].id,
+                                    to_index: i,
+                                })
+                                .await;
+                            break;
+                        }
+                        x += label_len;
+                    }
+                }
             }
         }
         MouseEventKind::ScrollUp => {
@@ -1487,9 +1535,8 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Moved => {
-            // Sidebar toggle button hover (« collapse — left 3 cols; » expand — whole 2-col area)
             let toggle_hovered = if app.sidebar_visible {
-                mouse.row == 0 && mouse.column < 3
+                mouse.row == 0 && mouse.column < SIDEBAR_W
             } else {
                 mouse.row == 0 && mouse.column < SIDEBAR_COLLAPSED_W
             };

@@ -133,7 +133,13 @@ pub enum PaneLayout {
         direction: SplitDir,
         first: Box<PaneLayout>,
         second: Box<PaneLayout>,
+        #[serde(default = "default_ratio")]
+        ratio: f32,
     },
+}
+
+fn default_ratio() -> f32 {
+    0.5
 }
 
 impl PaneLayout {
@@ -144,6 +150,7 @@ impl PaneLayout {
                     direction,
                     first: Box::new(PaneLayout::Leaf(target)),
                     second: Box::new(PaneLayout::Leaf(new_id)),
+                    ratio: 0.5,
                 };
                 true
             }
@@ -151,6 +158,30 @@ impl PaneLayout {
             PaneLayout::Split { first, second, .. } => {
                 first.split_leaf(target, direction, new_id)
                     || second.split_leaf(target, direction, new_id)
+            }
+        }
+    }
+
+    pub fn set_split_ratio(&mut self, first_pane: PaneId, ratio: f32) -> bool {
+        let ratio = ratio.clamp(0.1, 0.9);
+        match self {
+            PaneLayout::Leaf(_) => false,
+            PaneLayout::Split {
+                first,
+                second,
+                ratio: r,
+                ..
+            } => {
+                if first.leaves().contains(&first_pane) {
+                    *r = ratio;
+                    return true;
+                }
+                if second.leaves().contains(&first_pane) {
+                    *r = 1.0 - ratio;
+                    return true;
+                }
+                first.set_split_ratio(first_pane, ratio)
+                    || second.set_split_ratio(first_pane, ratio)
             }
         }
     }

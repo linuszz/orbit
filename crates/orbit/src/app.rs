@@ -252,6 +252,8 @@ pub struct App {
     pub launch_modal: Option<LaunchModalState>,
     /// Increments every animation tick (16 ms) while any agent is Working or Blocked.
     pub tick_count: u64,
+    pub drag_tab: Option<usize>,
+    pub drag_split: Option<(PaneId, SplitDir)>,
 }
 
 #[derive(Debug, Clone)]
@@ -409,6 +411,8 @@ impl App {
             eclipse_modal: None,
             launch_modal: None,
             tick_count: 0,
+            drag_tab: None,
+            drag_split: None,
         }
     }
 

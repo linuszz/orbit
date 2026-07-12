@@ -63,6 +63,15 @@ pub enum ClientMessage {
     SwitchTab {
         tab_id: crate::TabId,
     },
+    ReorderTab {
+        tab_id: crate::TabId,
+        to_index: usize,
+    },
+    ResizeSplit {
+        tab_id: crate::TabId,
+        first_pane: crate::PaneId,
+        ratio: f32,
+    },
 
     PaneInput {
         tab_id: crate::TabId,
