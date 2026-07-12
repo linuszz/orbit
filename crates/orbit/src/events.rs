@@ -1056,9 +1056,11 @@ async fn handle_mouse(
                     .agents
                     .iter()
                     .any(|a| a.status == orbit_protocol::AgentStatus::Blocked);
-                let respond_row = 3u16 + if app.agent_scroll_offset > 0 { 1 } else { 0 };
-                if any_blocked && mouse.row == respond_row && (1..=9).contains(&col_in_inner) {
-                    // [Respond] banner — open Eclipse modal for the first blocked agent
+                // Eclipse banner spans 2 rows: text (banner_row) + [Respond] (banner_row+1).
+                // Clicking anywhere on either row opens the Eclipse modal.
+                let banner_row = 2u16 + if app.agent_scroll_offset > 0 { 1 } else { 0 };
+                let respond_row = banner_row + 1;
+                if any_blocked && (mouse.row == banner_row || mouse.row == respond_row) {
                     if let Some(blocked) = app
                         .agents
                         .iter()
@@ -1479,10 +1481,10 @@ async fn handle_mouse(
                     }
                 } else if mouse.row + 1 == term_h {
                     Some(AgentHover::PanelFooter)
-                } else if any_blocked
-                    && mouse.row == 3 + if app.agent_scroll_offset > 0 { 1 } else { 0 }
-                    && (1..=9).contains(&col_in_inner)
-                {
+                } else if any_blocked && {
+                    let banner_row = 2u16 + if app.agent_scroll_offset > 0 { 1 } else { 0 };
+                    mouse.row == banner_row + 1 && (1..=9).contains(&col_in_inner)
+                } {
                     Some(AgentHover::EclipseRespond)
                 } else {
                     let base_row = crate::tui::widgets::agent_monitor::card_start_row(
