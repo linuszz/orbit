@@ -297,7 +297,7 @@ async fn handle_eclipse_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
     }
 }
 
-async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
+async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u16) {
     // Launch modal captures all keyboard input when open.
     if app.launch_modal.is_some() {
         handle_launch_key(key, app, writer).await;
@@ -459,9 +459,13 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
                 KeyCode::Down | KeyCode::Char('j') => {
                     if n > 0 {
                         *selected = (*selected + 1).min(n - 1);
-                        // Auto-scroll: keep selected within view (rough: 1 card per slot).
-                        if *selected >= app.agent_scroll_offset + 3 {
-                            app.agent_scroll_offset = selected.saturating_sub(2);
+                        // Auto-scroll: keep the selected card within the visible window.
+                        // Each card is 6 rows (5 content + 1 separator); header+divider = 2.
+                        let visible = ((term_h.saturating_sub(3)) / 6) as usize;
+                        let visible = visible.max(1);
+                        if *selected >= app.agent_scroll_offset + visible {
+                            app.agent_scroll_offset =
+                                selected.saturating_sub(visible.saturating_sub(1));
                         }
                     }
                 }
@@ -586,7 +590,8 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
             raw = event_stream.next() => {
                 match raw {
                     Some(Ok(Event::Key(key))) => {
-                        handle_key(key, app, &writer).await;
+                        let term_h = terminal.size().map(|s| s.height).unwrap_or(40);
+                        handle_key(key, app, &writer, term_h).await;
                     }
                     Some(Ok(Event::Resize(cols, rows))) => {
                         let sidebar_w: u16 = if app.sidebar_visible { SIDEBAR_W } else { SIDEBAR_COLLAPSED_W };

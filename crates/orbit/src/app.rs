@@ -770,6 +770,7 @@ impl App {
                     self.eclipse_modal = None;
                 }
                 self.agent_start_times.remove(id);
+                self.agent_blocked_times.remove(id);
                 self.agent_metrics.remove(id);
                 self.agents.retain(|a| a.id != *id);
                 if let Some(AgentHover::CardBtn { card_idx, .. }) = &self.agent_hovered {
