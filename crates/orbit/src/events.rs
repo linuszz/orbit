@@ -459,9 +459,22 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                 KeyCode::Down | KeyCode::Char('j') => {
                     if n > 0 {
                         *selected = (*selected + 1).min(n - 1);
-                        // Auto-scroll: keep the selected card within the visible window.
-                        // Each card is 6 rows (5 content + 1 separator); header+divider = 2.
-                        let visible = ((term_h.saturating_sub(3)) / 6) as usize;
+                        // Auto-scroll: keep selected card in the visible window.
+                        // Overhead: tab_bar(1) + status_bar(1) + header(1) + divider(1) + footer(1) = 5
+                        // Eclipse banner when any agent Blocked: +2 rows
+                        // "N above" scroll indicator: +1 when scrolled
+                        let banner_rows: u16 = if app
+                            .agents
+                            .iter()
+                            .any(|a| a.status == orbit_protocol::AgentStatus::Blocked)
+                        {
+                            2
+                        } else {
+                            0
+                        };
+                        let above_row: u16 = if app.agent_scroll_offset > 0 { 1 } else { 0 };
+                        let visible =
+                            ((term_h.saturating_sub(5 + banner_rows + above_row)) / 6) as usize;
                         let visible = visible.max(1);
                         if *selected >= app.agent_scroll_offset + visible {
                             app.agent_scroll_offset =
@@ -1387,7 +1400,19 @@ async fn handle_mouse(
         }
         MouseEventKind::ScrollDown => {
             if agent_w > 0 && mouse.column >= term_w.saturating_sub(agent_w) {
-                let max_scroll = app.agents.len().saturating_sub(1);
+                let banner_rows: u16 = if app
+                    .agents
+                    .iter()
+                    .any(|a| a.status == orbit_protocol::AgentStatus::Blocked)
+                {
+                    2
+                } else {
+                    0
+                };
+                let above_row: u16 = if app.agent_scroll_offset > 0 { 1 } else { 0 };
+                let visible =
+                    ((term_h.saturating_sub(5 + banner_rows + above_row)) / 6).max(1) as usize;
+                let max_scroll = app.agents.len().saturating_sub(visible);
                 app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max_scroll);
                 app.needs_redraw = true;
             } else if let InputMode::Scroll { offset } = &mut app.mode {
@@ -1483,7 +1508,8 @@ async fn handle_mouse(
                     Some(AgentHover::PanelFooter)
                 } else if any_blocked && {
                     let banner_row = 2u16 + if app.agent_scroll_offset > 0 { 1 } else { 0 };
-                    mouse.row == banner_row + 1 && (1..=9).contains(&col_in_inner)
+                    // [Respond] occupies the last 9 cols: col_in_inner >= iw-9 = agent_w-10
+                    mouse.row == banner_row + 1 && col_in_inner >= agent_w.saturating_sub(10)
                 } {
                     Some(AgentHover::EclipseRespond)
                 } else {

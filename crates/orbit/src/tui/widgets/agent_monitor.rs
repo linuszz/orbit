@@ -369,7 +369,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let metrics = app.agent_metrics.get(&agent.id);
             render_card(frame, ix, y, iw, agent, card_idx, app, metrics);
             y += 5;
-            if card_idx + 1 < visible_agents.len() && y < area.y + area.height {
+            if card_idx + 1 < visible_agents.len() && y < content_bottom {
                 // Blank separator row between cards (per design spec §5.1).
                 frame.render_widget(
                     Paragraph::new("").style(Style::default().bg(BG_SECONDARY)),
