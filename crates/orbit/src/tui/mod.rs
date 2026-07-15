@@ -147,9 +147,9 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
     };
 
     let block = Block::default()
-        .style(Style::default().bg(BG_SECONDARY).fg(FG_PRIMARY))
+        .style(Style::default().bg(bg_secondary()).fg(fg_primary()))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(BORDER));
+        .border_style(Style::default().fg(border()));
     frame.render_widget(block, help_area);
 
     let lines = vec![
@@ -172,7 +172,7 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
     let mut y_off = 1u16;
     let title = ratatui::text::Line::from(vec![ratatui::text::Span::styled(
         " Orbit — Keyboard Reference ",
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        Style::default().fg(accent()).add_modifier(Modifier::BOLD),
     )]);
     frame.render_widget(
         title,
@@ -189,12 +189,12 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         let line = if desc.is_empty() {
             ratatui::text::Line::from(vec![ratatui::text::Span::styled(
                 *key,
-                Style::default().fg(ACCENT_IDLE),
+                Style::default().fg(accent_idle()),
             )])
         } else {
             ratatui::text::Line::from(vec![
-                ratatui::text::Span::styled(format!(" {:<14}", key), Style::default().fg(ACCENT)),
-                ratatui::text::Span::styled(*desc, Style::default().fg(FG_SECONDARY)),
+                ratatui::text::Span::styled(format!(" {:<14}", key), Style::default().fg(accent())),
+                ratatui::text::Span::styled(*desc, Style::default().fg(fg_secondary())),
             ])
         };
         frame.render_widget(
@@ -212,7 +212,7 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
     y_off += 1;
     let hint = ratatui::text::Line::from(vec![ratatui::text::Span::styled(
         " Press any key to close ",
-        Style::default().fg(FG_MUTED),
+        Style::default().fg(fg_muted()),
     )]);
     frame.render_widget(
         hint,
@@ -247,7 +247,7 @@ pub fn find_split_at_cursor(
     area: Rect,
     col: u16,
     row: u16,
-) -> Option<(PaneId, SplitDir)> {
+) -> Option<(PaneId, PaneId, SplitDir)> {
     match node {
         PaneLayout::Leaf(_) => None,
         PaneLayout::Split {
@@ -274,7 +274,9 @@ pub fn find_split_at_cursor(
                 }
             };
             if near {
-                first.leaves().first().map(|&pid| (pid, *direction))
+                let first_leaf = first.leaves().first().copied()?;
+                let second_leaf = second.leaves().first().copied()?;
+                Some((first_leaf, second_leaf, *direction))
             } else {
                 find_split_at_cursor(first, first_area, col, row)
                     .or_else(|| find_split_at_cursor(second, second_area, col, row))
@@ -303,11 +305,23 @@ fn render_pane_tree(frame: &mut Frame, area: Rect, node: &PaneLayout, app: &App)
 }
 
 fn split_area(area: Rect, dir: &SplitDir, ratio: f32) -> (Rect, Rect) {
-    let ratio = ratio.clamp(0.1, 0.9);
+    let ratio = if ratio.is_finite() {
+        ratio.clamp(0.1, 0.9)
+    } else {
+        0.5
+    };
     match dir {
         SplitDir::Horizontal => {
             let total = area.width;
-            let first_w = (total as f32 * ratio) as u16;
+            let min_w = 3u16;
+            let first_w = if total <= 1 {
+                total
+            } else if total < 2 * min_w {
+                total / 2
+            } else {
+                let max_w = total.saturating_sub(min_w);
+                ((total as f32 * ratio) as u16).clamp(min_w, max_w)
+            };
             let first = Rect {
                 width: first_w,
                 ..area
@@ -321,7 +335,15 @@ fn split_area(area: Rect, dir: &SplitDir, ratio: f32) -> (Rect, Rect) {
         }
         SplitDir::Vertical => {
             let total = area.height;
-            let first_h = (total as f32 * ratio) as u16;
+            let min_h = 3u16;
+            let first_h = if total <= 1 {
+                total
+            } else if total < 2 * min_h {
+                total / 2
+            } else {
+                let max_h = total.saturating_sub(min_h);
+                ((total as f32 * ratio) as u16).clamp(min_h, max_h)
+            };
             let first = Rect {
                 height: first_h,
                 ..area
@@ -346,7 +368,7 @@ fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App)
         .map(|i| i + 1)
         .unwrap_or(1);
 
-    let border_color = if is_active { ACCENT } else { BORDER };
+    let border_color = if is_active { accent() } else { border() };
 
     let title = if is_active {
         format!(" {pane_idx}:~ *")
@@ -360,7 +382,7 @@ fn render_single_pane(frame: &mut Frame, area: Rect, pane_id: PaneId, app: &App)
         .title(Span::styled(
             title,
             Style::default()
-                .fg(if is_active { ACCENT_IDLE } else { FG_MUTED })
+                .fg(if is_active { accent_idle() } else { fg_muted() })
                 .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
@@ -527,5 +549,97 @@ fn render_row(frame: &mut Frame, x: u16, y: u16, cells: &[Cell], max_cols: usize
             }
             buf_cell.set_style(style);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orbit_protocol::SplitDir;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn split_area_normal_horizontal() {
+        let area = Rect::new(10, 5, 20, 10);
+        let (first, second) = split_area(area, &SplitDir::Horizontal, 0.3);
+        assert_eq!(first.x, 10);
+        assert_eq!(first.width, 6);
+        assert_eq!(second.x, 16);
+        assert_eq!(second.width, 14);
+    }
+
+    #[test]
+    fn split_area_normal_vertical() {
+        let area = Rect::new(0, 0, 10, 20);
+        let (first, second) = split_area(area, &SplitDir::Vertical, 0.7);
+        assert_eq!(first.y, 0);
+        assert_eq!(first.height, 14);
+        assert_eq!(second.y, 14);
+        assert_eq!(second.height, 6);
+    }
+
+    #[test]
+    fn split_area_minimum_sizes() {
+        let area = Rect::new(0, 0, 10, 3);
+        let (first, second) = split_area(area, &SplitDir::Horizontal, 0.05);
+        assert_eq!(first.width, 3);
+        assert_eq!(second.width, 7);
+    }
+
+    #[test]
+    fn split_area_tiny_area_fallback() {
+        let area = Rect::new(0, 0, 3, 3);
+        let (first, second) = split_area(area, &SplitDir::Horizontal, 0.1);
+        assert_eq!(first.width, 1);
+        assert_eq!(second.width, 2);
+    }
+
+    #[test]
+    fn split_area_zero_width_area() {
+        let area = Rect::new(0, 0, 0, 5);
+        let (first, second) = split_area(area, &SplitDir::Horizontal, 0.5);
+        assert_eq!(first.width, 0);
+        assert_eq!(second.width, 0);
+    }
+
+    #[test]
+    fn split_area_nan_ratio() {
+        let area = Rect::new(0, 0, 10, 10);
+        let (first, second) = split_area(area, &SplitDir::Horizontal, f32::NAN);
+        assert_eq!(first.width, 5);
+        assert_eq!(second.width, 5);
+    }
+
+    #[test]
+    fn find_split_at_cursor_horizontal() {
+        let layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            first: Box::new(PaneLayout::Leaf(PaneId(1))),
+            second: Box::new(PaneLayout::Leaf(PaneId(2))),
+            ratio: 0.5,
+        };
+        let area = Rect::new(0, 0, 20, 10);
+        assert_eq!(
+            find_split_at_cursor(&layout, area, 10, 5),
+            Some((PaneId(1), PaneId(2), SplitDir::Horizontal))
+        );
+        assert_eq!(find_split_at_cursor(&layout, area, 5, 5), None);
+    }
+
+    #[test]
+    fn compute_leaf_areas_basic() {
+        let layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            first: Box::new(PaneLayout::Leaf(PaneId(1))),
+            second: Box::new(PaneLayout::Leaf(PaneId(2))),
+            ratio: 0.5,
+        };
+        let area = Rect::new(0, 0, 20, 10);
+        let areas = compute_leaf_areas(&layout, area);
+        assert_eq!(areas.len(), 2);
+        assert_eq!(areas[0].0, PaneId(1));
+        assert_eq!(areas[0].1.width, 10);
+        assert_eq!(areas[1].0, PaneId(2));
+        assert_eq!(areas[1].1.width, 10);
     }
 }
