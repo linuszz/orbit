@@ -12,9 +12,9 @@ use crate::tui::widgets::agent_monitor::{blocked_pulse_color, working_pulse_colo
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let bg = Block::default()
-        .style(Style::default().bg(BG_SECONDARY).fg(FG_MUTED))
+        .style(Style::default().bg(bg_secondary()).fg(fg_muted()))
         .borders(ratatui::widgets::Borders::TOP)
-        .border_style(Style::default().fg(BORDER));
+        .border_style(Style::default().fg(border()));
     frame.render_widget(bg, area);
 
     let mut spans: Vec<Span> = vec![];
@@ -23,58 +23,58 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(
             " FLIGHT DECK  Esc:cancel ",
             Style::default()
-                .fg(BG_PRIMARY)
-                .bg(ACCENT)
+                .fg(bg_primary())
+                .bg(accent())
                 .add_modifier(Modifier::BOLD),
         ));
-        spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
+        spans.push(Span::styled(" | ", Style::default().fg(border())));
     }
 
     if let InputMode::Scroll { offset } = &app.mode {
         spans.push(Span::styled(
             format!(" SCROLL  -{offset} "),
             Style::default()
-                .fg(BG_PRIMARY)
-                .bg(ACCENT_IDLE)
+                .fg(bg_primary())
+                .bg(accent_idle())
                 .add_modifier(Modifier::BOLD),
         ));
-        spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
+        spans.push(Span::styled(" | ", Style::default().fg(border())));
     }
 
     if matches!(app.mode, InputMode::AgentPanel { .. }) {
         spans.push(Span::styled(
             " SATELLITE NAV ",
             Style::default()
-                .fg(BG_PRIMARY)
-                .bg(ACCENT)
+                .fg(bg_primary())
+                .bg(accent())
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
             " \u{2191}\u{2193}:nav Enter:view r:respond/rstr s:stop d:dismiss q:exit",
-            Style::default().fg(FG_MUTED),
+            Style::default().fg(fg_muted()),
         ));
-        spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
+        spans.push(Span::styled(" | ", Style::default().fg(border())));
     }
 
     spans.push(Span::styled(
         "[SPACE] ",
-        Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
+        Style::default().fg(fg_muted()).add_modifier(Modifier::BOLD),
     ));
     spans.push(Span::styled(
         &app.space_name,
-        Style::default().fg(FG_SECONDARY),
+        Style::default().fg(fg_secondary()),
     ));
-    spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
+    spans.push(Span::styled(" | ", Style::default().fg(border())));
 
     spans.push(Span::styled(
         app.current_tab_name(),
-        Style::default().fg(FG_MUTED),
+        Style::default().fg(fg_muted()),
     ));
     spans.push(Span::styled(
         "*",
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        Style::default().fg(accent()).add_modifier(Modifier::BOLD),
     ));
-    spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
+    spans.push(Span::styled(" | ", Style::default().fg(border())));
 
     // Live satellite fleet summary — highest-severity status wins.
     let n_blocked = app
@@ -112,7 +112,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("{n_error} debris")
         };
-        ("\u{25C9}", s, ACCENT_ERROR)
+        ("\u{25C9}", s, accent_error())
     } else if n_working > 0 {
         let s = if n_working == 1 {
             "transmitting".to_string()
@@ -127,9 +127,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("{n_idle} standby")
         };
-        ("\u{25CB}", s, ACCENT_IDLE)
+        ("\u{25CB}", s, accent_idle())
     } else {
-        ("\u{25CB}", "idle".to_string(), ACCENT_IDLE)
+        ("\u{25CB}", "idle".to_string(), accent_idle())
     };
     spans.push(Span::styled(
         format!("{icon} {label}"),
@@ -137,10 +137,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ));
 
     if !app.space_path.is_empty() && app.space_path != "." {
-        spans.push(Span::styled(" | ", Style::default().fg(BORDER)));
+        spans.push(Span::styled(" | ", Style::default().fg(border())));
         spans.push(Span::styled(
             &app.space_path,
-            Style::default().fg(FG_SECONDARY),
+            Style::default().fg(fg_secondary()),
         ));
     }
 
@@ -152,7 +152,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let mm = (secs / 60 % 60) as u8;
     spans.push(Span::styled(
         format!(" | {hh:02}:{mm:02}"),
-        Style::default().fg(FG_MUTED),
+        Style::default().fg(fg_muted()),
     ));
 
     let line = Line::from(spans);

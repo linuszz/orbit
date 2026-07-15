@@ -36,9 +36,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(Clear, menu_area);
 
         let block = Block::default()
-            .style(Style::default().bg(BG_SECONDARY).fg(FG_PRIMARY))
+            .style(Style::default().bg(bg_secondary()).fg(fg_primary()))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(BORDER));
+            .border_style(Style::default().fg(border()));
         frame.render_widget(block, menu_area);
 
         for (i, item) in menu.items.iter().enumerate() {
@@ -49,19 +49,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 } => {
                     let is_selected = i == menu.selected;
                     let bg = if is_selected {
-                        BG_PRIMARY
+                        bg_primary()
                     } else {
-                        BG_SECONDARY
+                        bg_secondary()
                     };
                     let label_style = if is_selected {
                         Style::default()
-                            .fg(FG_PRIMARY)
+                            .fg(fg_primary())
                             .bg(bg)
                             .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(FG_SECONDARY).bg(bg)
+                        Style::default().fg(fg_secondary()).bg(bg)
                     };
-                    let shortcut_style = Style::default().fg(ACCENT).bg(bg);
+                    let shortcut_style = Style::default().fg(accent()).bg(bg);
 
                     let label_span = Span::styled(format!(" {label}"), label_style);
                     let mut spans = vec![label_span];
@@ -86,7 +86,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 ContextMenuItem::Separator => {
                     let line = Line::from(Span::styled(
                         "\u{2500}".repeat(menu_area.width as usize),
-                        Style::default().fg(BORDER),
+                        Style::default().fg(border()),
                     ));
                     frame.render_widget(
                         line,

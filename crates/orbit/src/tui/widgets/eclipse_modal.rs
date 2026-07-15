@@ -46,12 +46,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .title(title)
         .title_style(
             Style::default()
-                .fg(ACCENT_BLOCKED)
+                .fg(accent_blocked())
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(ACCENT_BLOCKED))
-        .style(Style::default().bg(BG_SECONDARY));
+        .border_style(Style::default().fg(accent_blocked()))
+        .style(Style::default().bg(bg_secondary()));
     frame.render_widget(block, modal_area);
 
     let inner_x = modal_area.x + 1;
@@ -65,7 +65,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(
                 "AGENT BLOCKED",
                 Style::default()
-                    .fg(ACCENT_BLOCKED)
+                    .fg(accent_blocked())
                     .add_modifier(Modifier::BOLD),
             ),
         ])),
@@ -83,7 +83,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(Span::styled(
             truncate_str(&subtitle, inner_w as usize),
-            Style::default().fg(FG_SECONDARY),
+            Style::default().fg(fg_secondary()),
         )),
         Rect {
             x: inner_x,
@@ -113,7 +113,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(
             Paragraph::new(Span::styled(
                 format!("{:<width$}", ctx1, width = inner_w as usize),
-                Style::default().fg(FG_MUTED),
+                Style::default().fg(fg_muted()),
             )),
             Rect {
                 x: inner_x,
@@ -152,7 +152,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(
             Paragraph::new(Span::styled(
                 format!("{:<width$}", ctx2, width = inner_w as usize),
-                Style::default().fg(FG_MUTED),
+                Style::default().fg(fg_muted()),
             )),
             Rect {
                 x: inner_x,
@@ -171,7 +171,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(Span::styled(
             " Last message:",
-            Style::default().fg(FG_MUTED),
+            Style::default().fg(fg_muted()),
         )),
         Rect {
             x: inner_x,
@@ -188,7 +188,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     {
         let border_top = format!("\u{250c}{}\u{2510}", "\u{2500}".repeat(block_w as usize));
         frame.render_widget(
-            Paragraph::new(Span::styled(border_top, Style::default().fg(BORDER))),
+            Paragraph::new(Span::styled(border_top, Style::default().fg(border()))),
             Rect {
                 x: msg_inner_x,
                 y: row,
@@ -199,16 +199,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         row += 1;
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("\u{2502}", Style::default().fg(BORDER)),
+                Span::styled("\u{2502}", Style::default().fg(border())),
                 Span::styled(
                     format!(
                         "{:<width$}",
                         truncate_str(&modal.block_msg, block_w as usize),
                         width = block_w as usize
                     ),
-                    Style::default().fg(FG_SECONDARY),
+                    Style::default().fg(fg_secondary()),
                 ),
-                Span::styled("\u{2502}", Style::default().fg(BORDER)),
+                Span::styled("\u{2502}", Style::default().fg(border())),
             ])),
             Rect {
                 x: msg_inner_x,
@@ -220,7 +220,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         row += 1;
         let border_bot = format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(block_w as usize));
         frame.render_widget(
-            Paragraph::new(Span::styled(border_bot, Style::default().fg(BORDER))),
+            Paragraph::new(Span::styled(border_bot, Style::default().fg(border()))),
             Rect {
                 x: msg_inner_x,
                 y: row,
@@ -235,7 +235,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(Span::styled(
             " Your response:",
-            Style::default().fg(FG_MUTED),
+            Style::default().fg(fg_muted()),
         )),
         Rect {
             x: inner_x,
@@ -250,7 +250,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     {
         let border_top = format!("\u{250c}{}\u{2510}", "\u{2500}".repeat(block_w as usize));
         frame.render_widget(
-            Paragraph::new(Span::styled(border_top, Style::default().fg(ACCENT))),
+            Paragraph::new(Span::styled(border_top, Style::default().fg(accent()))),
             Rect {
                 x: msg_inner_x,
                 y: row,
@@ -265,9 +265,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let input_padded = format!("{:<width$}", input_truncated, width = block_w as usize);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("\u{2502}", Style::default().fg(ACCENT)),
-                Span::styled(input_padded, Style::default().fg(FG_PRIMARY)),
-                Span::styled("\u{2502}", Style::default().fg(ACCENT)),
+                Span::styled("\u{2502}", Style::default().fg(accent())),
+                Span::styled(input_padded, Style::default().fg(fg_primary())),
+                Span::styled("\u{2502}", Style::default().fg(accent())),
             ])),
             Rect {
                 x: msg_inner_x,
@@ -279,7 +279,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         row += 1;
         let border_bot = format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(block_w as usize));
         frame.render_widget(
-            Paragraph::new(Span::styled(border_bot, Style::default().fg(ACCENT))),
+            Paragraph::new(Span::styled(border_bot, Style::default().fg(accent()))),
             Rect {
                 x: msg_inner_x,
                 y: row,
@@ -300,12 +300,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::raw(" "),
-                Span::styled("[Send]", Style::default().fg(ACCENT)),
+                Span::styled("[Send]", Style::default().fg(accent())),
                 Span::raw("  "),
-                Span::styled("[Cancel]", Style::default().fg(FG_MUTED)),
+                Span::styled("[Cancel]", Style::default().fg(fg_muted())),
                 Span::raw("  "),
-                Span::styled("[Abort Eclipse]", Style::default().fg(ACCENT_ERROR)),
-                Span::styled("   Enter:send  Esc:cancel", Style::default().fg(FG_MUTED)),
+                Span::styled("[Abort Eclipse]", Style::default().fg(accent_error())),
+                Span::styled("   Enter:send  Esc:cancel", Style::default().fg(fg_muted())),
             ])),
             Rect {
                 x: inner_x,

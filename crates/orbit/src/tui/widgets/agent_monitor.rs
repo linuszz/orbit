@@ -22,11 +22,11 @@ fn status_icon(status: &AgentStatus) -> &'static str {
 
 fn status_color(status: &AgentStatus) -> ratatui::style::Color {
     match status {
-        AgentStatus::Working => ACCENT,
-        AgentStatus::Idle => FG_MUTED,
-        AgentStatus::Blocked => ACCENT_BLOCKED,
-        AgentStatus::Error => ACCENT_ERROR,
-        AgentStatus::Done => FG_MUTED,
+        AgentStatus::Working => accent(),
+        AgentStatus::Idle => fg_muted(),
+        AgentStatus::Blocked => accent_blocked(),
+        AgentStatus::Error => accent_error(),
+        AgentStatus::Done => fg_muted(),
     }
 }
 
@@ -58,7 +58,7 @@ pub fn working_pulse_color(tick: u64) -> ratatui::style::Color {
     )
 }
 
-/// Blocked fast pulse color (48 ticks / ~0.8 s): dark gold → ACCENT_BLOCKED.
+/// Blocked fast pulse color (48 ticks / ~0.8 s): dark gold → accent_blocked().
 pub fn blocked_pulse_color(tick: u64) -> ratatui::style::Color {
     let p = triangle_phase(tick, 48);
     ratatui::style::Color::Rgb(
@@ -68,7 +68,7 @@ pub fn blocked_pulse_color(tick: u64) -> ratatui::style::Color {
     )
 }
 
-/// Error blink color (60 ticks / ~1.0 s): dark red → ACCENT_ERROR.
+/// Error blink color (60 ticks / ~1.0 s): dark red → accent_error().
 pub fn error_blink_color(tick: u64) -> ratatui::style::Color {
     let p = triangle_phase(tick, 60);
     ratatui::style::Color::Rgb(
@@ -152,9 +152,9 @@ fn format_duration(secs: u32) -> String {
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
-        .style(Style::default().bg(BG_SECONDARY))
+        .style(Style::default().bg(bg_secondary()))
         .borders(Borders::LEFT)
-        .border_style(Style::default().fg(BORDER));
+        .border_style(Style::default().fg(border()));
     frame.render_widget(block, area);
 
     let ix = area.x + 1; // inner x (after left border)
@@ -175,28 +175,30 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let badge_color = if any_blocked {
             blocked_pulse_color(app.tick_count)
         } else {
-            FG_MUTED
+            fg_muted()
         };
         // right side: "[+]×" = 4 chars
         let right_chars = 4u16;
         let fill = iw.saturating_sub(10 + 1 + badge.len() as u16 + right_chars) as usize;
 
         let (add_fg, add_bg) = if app.agent_hovered == Some(AgentHover::HeaderAdd) {
-            (BG_PRIMARY, ACCENT_HOVER)
+            (bg_primary(), accent_hover())
         } else {
-            (FG_MUTED, BG_SECONDARY)
+            (fg_muted(), bg_secondary())
         };
         let (close_fg, close_bg) = if app.agent_hovered == Some(AgentHover::HeaderClose) {
-            (BG_PRIMARY, ACCENT_ERROR)
+            (bg_primary(), accent_error())
         } else {
-            (FG_MUTED, BG_SECONDARY)
+            (fg_muted(), bg_secondary())
         };
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
                     "SATELLITES",
-                    Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(fg_primary())
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" "),
                 Span::styled(badge, Style::default().fg(badge_color)),
@@ -218,7 +220,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Line::from(Span::styled(
             "\u{2500}".repeat(iw as usize),
-            Style::default().fg(BORDER),
+            Style::default().fg(border()),
         )),
         Rect {
             x: ix,
@@ -234,7 +236,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if app.agent_scroll_offset > 0 && y < area.y + area.height {
         let above_text = format!(" \u{25B4} {} above", app.agent_scroll_offset);
         frame.render_widget(
-            Paragraph::new(Span::styled(above_text, Style::default().fg(FG_MUTED))),
+            Paragraph::new(Span::styled(above_text, Style::default().fg(fg_muted()))),
             Rect {
                 x: ix,
                 y,
@@ -266,10 +268,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("\u{25CE}", Style::default().fg(icon_color).bg(BG_TERTIARY)),
+                Span::styled(
+                    "\u{25CE}",
+                    Style::default().fg(icon_color).bg(bg_tertiary()),
+                ),
                 Span::styled(
                     text_part,
-                    Style::default().fg(ACCENT_BLOCKED).bg(BG_TERTIARY),
+                    Style::default().fg(accent_blocked()).bg(bg_tertiary()),
                 ),
             ])),
             Rect {
@@ -282,9 +287,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         y += 1;
 
         let (resp_fg, resp_bg) = if app.agent_hovered == Some(AgentHover::EclipseRespond) {
-            (BG_PRIMARY, ACCENT_BLOCKED)
+            (bg_primary(), accent_blocked())
         } else {
-            (ACCENT_BLOCKED, BG_TERTIARY)
+            (accent_blocked(), bg_tertiary())
         };
         // Show block_msg preview to the left of [Respond] if available.
         let block_preview = blocked_agents
@@ -300,7 +305,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Paragraph::new(Line::from(vec![
                 Span::styled(
                     format!(" {}", preview_padded),
-                    Style::default().fg(FG_MUTED).bg(BG_TERTIARY),
+                    Style::default().fg(fg_muted()).bg(bg_tertiary()),
                 ),
                 Span::styled("[Respond]", Style::default().fg(resp_fg).bg(resp_bg)),
             ])),
@@ -325,7 +330,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                         "\u{25CB} \u{25CB} \u{25CB}",
                         width = iw as usize
                     ),
-                    Style::default().fg(FG_MUTED),
+                    Style::default().fg(fg_muted()),
                 ))),
                 Rect {
                     x: ix,
@@ -338,7 +343,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(
                         format!("{:^width$}", "No satellites running", width = iw as usize),
-                        Style::default().fg(FG_MUTED),
+                        Style::default().fg(fg_muted()),
                     ))),
                     Rect {
                         x: ix,
@@ -362,7 +367,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 if remaining > 0 && content_bottom >= 1 && y < content_bottom {
                     let more_text = format!(" \u{25BE} {} more", remaining);
                     frame.render_widget(
-                        Paragraph::new(Span::styled(more_text, Style::default().fg(FG_MUTED))),
+                        Paragraph::new(Span::styled(more_text, Style::default().fg(fg_muted()))),
                         Rect {
                             x: ix,
                             y: content_bottom.saturating_sub(1),
@@ -379,7 +384,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             if card_idx + 1 < visible_agents.len() && y < content_bottom {
                 // Blank separator row between cards (per design spec §5.1).
                 frame.render_widget(
-                    Paragraph::new("").style(Style::default().bg(BG_SECONDARY)),
+                    Paragraph::new("").style(Style::default().bg(bg_secondary())),
                     Rect {
                         x: ix,
                         y,
@@ -415,11 +420,15 @@ fn render_card(
     } else {
         false
     };
-    let card_bg = if is_selected { BG_CARD } else { BG_SECONDARY };
+    let card_bg = if is_selected {
+        bg_card()
+    } else {
+        bg_secondary()
+    };
     // Leading accent mark: orange ▸ for keyboard-selected cards; animated ▌ for blocked/error
     // cards (left-border accent, spec §3.3 "边框: Warning"); plain space otherwise.
     let sel_mark = if is_selected {
-        Span::styled("\u{25B8}", Style::default().fg(ACCENT).bg(card_bg)) // ▸ orange selection
+        Span::styled("\u{25B8}", Style::default().fg(accent()).bg(card_bg)) // ▸ orange selection
     } else {
         match agent.status {
             AgentStatus::Blocked => Span::styled(
@@ -465,7 +474,7 @@ fn render_card(
                 Span::styled(
                     name_padded,
                     Style::default()
-                        .fg(FG_PRIMARY)
+                        .fg(fg_primary())
                         .bg(card_bg)
                         .add_modifier(Modifier::BOLD),
                 ),
@@ -523,7 +532,7 @@ fn render_card(
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 sel_mark.clone(),
-                Span::styled(model_body, Style::default().fg(FG_MUTED).bg(card_bg)),
+                Span::styled(model_body, Style::default().fg(fg_muted()).bg(card_bg)),
             ])),
             Rect {
                 x,
@@ -557,12 +566,12 @@ fn render_card(
         };
         let task = truncate_str(task_str, w.saturating_sub(1) as usize);
         let task_body = format!("{:<width$}", task, width = w.saturating_sub(1) as usize);
-        // Blocked: block reason highlighted in ACCENT_BLOCKED + Bold (spec §7.1 Level 2).
-        // Error: error text in ACCENT_ERROR.
+        // Blocked: block reason highlighted in accent_blocked() + Bold (spec §7.1 Level 2).
+        // Error: error text in accent_error().
         let (task_fg, task_mod) = match agent.status {
-            AgentStatus::Blocked => (ACCENT_BLOCKED, Modifier::BOLD),
-            AgentStatus::Error => (ACCENT_ERROR, Modifier::empty()),
-            _ => (FG_SECONDARY, Modifier::empty()),
+            AgentStatus::Blocked => (accent_blocked(), Modifier::BOLD),
+            AgentStatus::Error => (accent_error(), Modifier::empty()),
+            _ => (fg_secondary(), Modifier::empty()),
         };
         frame.render_widget(
             Paragraph::new(Line::from(vec![
@@ -624,7 +633,7 @@ fn render_card(
                 Paragraph::new(Line::from(vec![
                     sel_mark.clone(),
                     Span::styled(bar, Style::default().fg(sc).bg(card_bg)),
-                    Span::styled(suffix, Style::default().fg(FG_MUTED).bg(card_bg)),
+                    Span::styled(suffix, Style::default().fg(fg_muted()).bg(card_bg)),
                 ])),
                 Rect {
                     x,
@@ -667,17 +676,17 @@ fn render_card(
                 });
             let (fg, bg) = if hovered {
                 (
-                    BG_PRIMARY,
+                    bg_primary(),
                     if *is_danger {
-                        ACCENT_ERROR
+                        accent_error()
                     } else {
-                        ACCENT_HOVER
+                        accent_hover()
                     },
                 )
             } else if *is_danger {
-                (ACCENT_ERROR, card_bg)
+                (accent_error(), card_bg)
             } else {
-                (FG_MUTED, card_bg)
+                (fg_muted(), card_bg)
             };
             spans.push(Span::styled(*btn_label, Style::default().fg(fg).bg(bg)));
         }
@@ -697,9 +706,9 @@ fn render_card(
 fn render_footer(frame: &mut Frame, ix: u16, iw: u16, area: Rect, app: &App) {
     let footer_y = area.y + area.height.saturating_sub(1);
     let (fg, bg) = if app.agent_hovered == Some(AgentHover::PanelFooter) {
-        (BG_PRIMARY, ACCENT_HOVER)
+        (bg_primary(), accent_hover())
     } else {
-        (FG_MUTED, BG_SECONDARY)
+        (fg_muted(), bg_secondary())
     };
     let label = format!("{:<width$}", " [+] Add Satellite", width = iw as usize);
     frame.render_widget(

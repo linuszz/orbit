@@ -25,9 +25,9 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     // Header: « collapse button on the LEFT (cols 0-2), keeping it far from the tab bar edge.
     // This prevents accidental tab-bar clicks from triggering sidebar collapse.
     let collapse_fg = if app.sidebar_toggle_hovered {
-        ACCENT
+        accent()
     } else {
-        FG_MUTED
+        fg_muted()
     };
     let spaces_fill = format!("{:<width$}", "SPACES", width = w.saturating_sub(3) as usize);
     frame.render_widget(
@@ -35,7 +35,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(" \u{00AB} ", Style::default().fg(collapse_fg)),
             Span::styled(
                 spaces_fill,
-                Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
+                Style::default().fg(fg_muted()).add_modifier(Modifier::BOLD),
             ),
         ])),
         Rect {
@@ -50,7 +50,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     // Top divider
     let div = "\u{2500}".repeat(w as usize);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(div, Style::default().fg(BORDER)))),
+        Paragraph::new(Line::from(Span::styled(div, Style::default().fg(border())))),
         Rect {
             x,
             y,
@@ -63,14 +63,21 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     // Reserve 2 rows at the bottom: one divider + one button bar.
     let bottom_content = area.y + area.height.saturating_sub(2);
 
-    // Cards — 3 rows each: name, cwd, stats; 1-row gap between cards
     for (i, space) in app.spaces.iter().enumerate() {
-        if y + 3 > bottom_content {
+        if y + 4 > bottom_content {
             break;
         }
 
         let is_active = i == app.active_space_idx;
         let is_hovered = app.sidebar_hovered == Some(i);
+
+        let card_bg = if is_active {
+            accent()
+        } else if is_hovered {
+            accent_hover()
+        } else {
+            bg_secondary()
+        };
 
         // Name row
         let name_trunc = truncate(&space.name, (w as usize).saturating_sub(1));
@@ -80,11 +87,11 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
             width = (w as usize).saturating_sub(1)
         );
         let (name_bg, name_fg, name_mod) = if is_active {
-            (ACCENT, BG_PRIMARY, Modifier::BOLD)
+            (accent(), bg_primary(), Modifier::BOLD)
         } else if is_hovered {
-            (ACCENT_HOVER, FG_PRIMARY, Modifier::empty())
+            (accent_hover(), fg_primary(), Modifier::empty())
         } else {
-            (BG_SECONDARY, FG_SECONDARY, Modifier::empty())
+            (bg_secondary(), fg_secondary(), Modifier::empty())
         };
         frame.render_widget(
             Paragraph::new(Span::styled(
@@ -103,19 +110,24 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         );
         y += 1;
 
-        // CWD row
-        let cwd_trunc = truncate(&space.cwd, (w as usize).saturating_sub(1));
+        let cwd_display = space
+            .cwd
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&space.cwd);
+        let cwd_trunc = truncate(cwd_display, (w as usize).saturating_sub(3));
         let cwd_text = format!(
             " {:<width$}",
             cwd_trunc,
             width = (w as usize).saturating_sub(1)
         );
         let (cwd_bg, cwd_fg) = if is_active {
-            (ACCENT, BG_PRIMARY)
+            (accent(), bg_primary())
         } else if is_hovered {
-            (ACCENT_HOVER, FG_SECONDARY)
+            (accent_hover(), fg_primary())
         } else {
-            (BG_SECONDARY, FG_MUTED)
+            (bg_secondary(), fg_muted())
         };
         frame.render_widget(
             Paragraph::new(Span::styled(
@@ -164,11 +176,11 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         };
         let base_stats = format!(" {} {}t {}p", status_sym, space.tab_count, space.pane_count);
         let (stats_bg, stats_fg) = if is_active {
-            (ACCENT, BG_PRIMARY)
+            (accent(), bg_primary())
         } else if is_hovered {
-            (ACCENT_HOVER, FG_MUTED)
+            (accent_hover(), fg_primary())
         } else {
-            (BG_SECONDARY, FG_MUTED)
+            (bg_secondary(), fg_muted())
         };
         // Color the agent badge by urgency (only on non-active rows so it's visible).
         let badge_color = if is_active || is_hovered {
@@ -183,11 +195,11 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
                 .filter(|a| a.status == AgentStatus::Working)
                 .count();
             if n_blocked > 0 {
-                ACCENT_BLOCKED
+                accent_blocked()
             } else if n_working > 0 {
-                ACCENT
+                accent()
             } else {
-                FG_MUTED
+                fg_muted()
             }
         } else {
             stats_fg
@@ -210,10 +222,21 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         );
         y += 1;
 
+        frame.render_widget(
+            Paragraph::new("").style(Style::default().bg(card_bg)),
+            Rect {
+                x,
+                y,
+                width: w,
+                height: 1,
+            },
+        );
+        y += 1;
+
         // Gap row between cards (not after the last one)
         if i + 1 < app.spaces.len() && y < bottom_content {
             frame.render_widget(
-                Paragraph::new("").style(Style::default().bg(BG_PRIMARY)),
+                Paragraph::new("").style(Style::default().bg(bg_primary())),
                 Rect {
                     x,
                     y,
@@ -229,7 +252,10 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     let divider_y = area.y + area.height.saturating_sub(2);
     let div2 = "\u{2500}".repeat(w as usize);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(div2, Style::default().fg(BORDER)))),
+        Paragraph::new(Line::from(Span::styled(
+            div2,
+            Style::default().fg(border()),
+        ))),
         Rect {
             x,
             y: divider_y,
@@ -246,14 +272,14 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     let right_w = w.saturating_sub(1 + left_w); // 10 when w=20
 
     let (left_fg, left_bg) = if app.sidebar_hovered == Some(n) {
-        (FG_PRIMARY, ACCENT_HOVER)
+        (fg_primary(), accent_hover())
     } else {
-        (FG_MUTED, BG_CARD)
+        (fg_muted(), bg_card())
     };
     let (right_fg, right_bg) = if app.sidebar_hovered == Some(n + 1) {
-        (FG_PRIMARY, ACCENT_HOVER)
+        (fg_primary(), accent_hover())
     } else {
-        (FG_MUTED, BG_CARD)
+        (fg_muted(), bg_card())
     };
 
     let left_text = format!("{:<width$}", " [+] New", width = left_w as usize);
@@ -262,7 +288,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(left_text, Style::default().fg(left_fg).bg(left_bg)),
-            Span::styled("\u{2502}", Style::default().fg(BORDER).bg(BG_CARD)),
+            Span::styled("\u{2502}", Style::default().fg(border()).bg(bg_card())),
             Span::styled(right_text, Style::default().fg(right_fg).bg(right_bg)),
         ])),
         Rect {
@@ -276,7 +302,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     for row in area.y..area.y + area.height {
         if let Some(cell) = frame.buffer_mut().cell_mut((sep_x, row)) {
             cell.set_char('\u{2502}')
-                .set_style(Style::default().fg(BORDER));
+                .set_style(Style::default().fg(border()));
         }
     }
 }
@@ -287,9 +313,9 @@ fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {
 
     // Expand hint at top (row 0) — right-aligned to match the space number labels below
     let expand_fg = if app.sidebar_toggle_hovered {
-        ACCENT
+        accent()
     } else {
-        FG_MUTED
+        fg_muted()
     };
     frame.render_widget(
         Paragraph::new(Span::styled(" \u{00BB}", Style::default().fg(expand_fg))),
@@ -309,9 +335,9 @@ fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {
         }
         let is_active = i == app.active_space_idx;
         let (fg, bg) = if is_active {
-            (BG_PRIMARY, ACCENT)
+            (bg_primary(), accent())
         } else {
-            (FG_MUTED, BG_SECONDARY)
+            (fg_muted(), bg_secondary())
         };
         let label = format!("{:>2}", i + 1);
         frame.render_widget(

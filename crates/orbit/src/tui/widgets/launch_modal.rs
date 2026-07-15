@@ -33,10 +33,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Clear, modal_area);
     let block = Block::default()
         .title(" Launch Satellite ")
-        .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+        .title_style(Style::default().fg(accent()).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(ACCENT))
-        .style(Style::default().bg(BG_SECONDARY));
+        .border_style(Style::default().fg(accent()))
+        .style(Style::default().bg(bg_secondary()));
     frame.render_widget(block, modal_area);
 
     let ix = modal_area.x + 1;
@@ -48,7 +48,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // "Agent:" label
     frame.render_widget(
-        Paragraph::new(Span::styled(" Agent:", Style::default().fg(FG_MUTED))),
+        Paragraph::new(Span::styled(" Agent:", Style::default().fg(fg_muted()))),
         Rect {
             x: ix,
             y: row,
@@ -65,9 +65,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         }
         let selected = modal.selected == i;
         let (prefix_fg, name_fg, label_fg, bg) = if selected {
-            (ACCENT, FG_PRIMARY, FG_SECONDARY, BG_TERTIARY)
+            (accent(), fg_primary(), fg_secondary(), bg_tertiary())
         } else {
-            (FG_MUTED, FG_MUTED, FG_MUTED, BG_SECONDARY)
+            (fg_muted(), fg_muted(), fg_muted(), bg_secondary())
         };
         let prefix = if selected { "\u{25B8}" } else { " " };
         frame.render_widget(
@@ -112,10 +112,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::raw(" "),
-                Span::styled("[Launch]", Style::default().fg(ACCENT)),
+                Span::styled("[Launch]", Style::default().fg(accent())),
                 Span::raw("  "),
-                Span::styled("[Cancel]", Style::default().fg(FG_MUTED)),
-                Span::styled("   Enter:launch  Esc:cancel", Style::default().fg(FG_MUTED)),
+                Span::styled("[Cancel]", Style::default().fg(fg_muted())),
+                Span::styled(
+                    "   Enter:launch  Esc:cancel",
+                    Style::default().fg(fg_muted()),
+                ),
             ])),
             Rect {
                 x: ix,

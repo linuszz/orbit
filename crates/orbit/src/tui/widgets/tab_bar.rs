@@ -1,3 +1,4 @@
+use orbit_protocol::AgentStatus;
 use ratatui::{layout::Rect, Frame};
 
 use crate::app::App;
@@ -9,36 +10,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     use crate::tui::theme::*;
 
-    let mut spans: Vec<Span> = Vec::new();
-
-    for (i, tab) in app.tabs.iter().enumerate() {
-        let label = format!(" {} ", tab.name);
-        let (bg, fg, mods) = if tab.id == app.active_tab_id {
-            (ACCENT, BG_PRIMARY, Modifier::BOLD)
-        } else if app.tab_hovered == Some(i) {
-            (ACCENT_HOVER, FG_PRIMARY, Modifier::empty())
-        } else {
-            (BG_CARD, FG_MUTED, Modifier::empty())
-        };
-        spans.push(Span::styled(
-            label,
-            Style::default().fg(fg).bg(bg).add_modifier(mods),
-        ));
-    }
-
-    // New tab button: default text=FG_MUTED bg=BG_CARD, hover text=ACCENT bg=BG_CARD
-    let new_tab_fg = if app.tab_hovered == Some(app.tabs.len()) {
-        ACCENT
-    } else {
-        FG_MUTED
-    };
-    spans.push(Span::styled(
-        " + ",
-        Style::default().fg(new_tab_fg).bg(BG_CARD),
-    ));
-
-    // Build the "[A] Satellites" label; append fleet status badge when panel is hidden.
-    use orbit_protocol::AgentStatus;
     let fleet_badge: String = if !app.agent_panel_visible && !app.agents.is_empty() {
         let n_blocked = app
             .agents
@@ -67,26 +38,70 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         String::new()
     };
-    let agent_label = format!(" [A] Satellites{} ", fleet_badge);
-
-    // Fill remaining space with BG_SECONDARY
-    let used_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum::<u16>();
+    let agent_label = format!(" [A] Agent Fleet{} ", fleet_badge);
     let agent_badge_w: u16 = agent_label.chars().count() as u16;
+
+    let max_tabs_w = area.width.saturating_sub(3 + agent_badge_w + 1);
+    let mut spans: Vec<Span> = Vec::new();
+    let mut used_w: u16 = 0;
+    let mut truncated = false;
+
+    for (i, tab) in app.tabs.iter().enumerate() {
+        let label = format!(" {} ", tab.name);
+        let label_w = label.len() as u16 + 1;
+        if used_w + label_w > max_tabs_w {
+            truncated = true;
+            break;
+        }
+        if i > 0 {
+            spans.push(Span::raw(" "));
+            used_w += 1;
+        }
+        used_w += label_w - 1;
+        let (bg, fg, mods) = if tab.id == app.active_tab_id {
+            (accent(), bg_primary(), Modifier::BOLD)
+        } else if app.tab_hovered == Some(i) {
+            (accent_hover(), fg_primary(), Modifier::empty())
+        } else {
+            (bg_card(), fg_muted(), Modifier::empty())
+        };
+        spans.push(Span::styled(
+            label,
+            Style::default().fg(fg).bg(bg).add_modifier(mods),
+        ));
+    }
+
+    if truncated {
+        spans.push(Span::styled(
+            " \u{2026} ",
+            Style::default().fg(fg_muted()).bg(bg_secondary()),
+        ));
+    }
+
+    let new_tab_fg = if app.tab_hovered == Some(app.tabs.len()) {
+        accent()
+    } else {
+        fg_muted()
+    };
+    spans.push(Span::styled(
+        " + ",
+        Style::default().fg(new_tab_fg).bg(bg_card()),
+    ));
+
+    let used_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum::<u16>();
     let fill_len = area.width.saturating_sub(used_width + agent_badge_w) as usize;
     spans.push(Span::styled(
         " ".repeat(fill_len),
-        Style::default().bg(BG_SECONDARY),
+        Style::default().bg(bg_secondary()),
     ));
 
-    // Agent panel toggle — right-aligned; badge color reflects fleet urgency when hidden.
     let (agent_fg, agent_bg) = if app.agent_panel_visible {
-        (BG_PRIMARY, ACCENT)
+        (bg_primary(), accent())
     } else if app.tab_hovered == Some(app.tabs.len() + 1) {
-        (FG_PRIMARY, ACCENT_HOVER)
+        (fg_primary(), accent_hover())
     } else {
-        (FG_MUTED, BG_CARD)
+        (fg_muted(), bg_card())
     };
-    // When panel is closed and agents need attention, tint the badge icon.
     let badge_icon_color = if !app.agent_panel_visible {
         let n_blocked = app
             .agents
@@ -99,9 +114,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .filter(|a| a.status == AgentStatus::Working)
             .count();
         if n_blocked > 0 {
-            Some(ACCENT_BLOCKED)
+            Some(accent_blocked())
         } else if n_working > 0 {
-            Some(ACCENT)
+            Some(accent())
         } else {
             None
         }
@@ -109,8 +124,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         None
     };
     if let Some(icon_color) = badge_icon_color {
-        // Render the base label without the badge, then the badge in accent color.
-        let base = " [A] Satellites";
+        let base = " [A] Agent Fleet";
         let badge = format!("{} ", fleet_badge);
         spans.push(Span::styled(
             base,

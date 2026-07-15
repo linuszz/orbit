@@ -58,9 +58,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(Clear, palette_area);
 
         let block = Block::default()
-            .style(Style::default().bg(BG_SECONDARY).fg(FG_PRIMARY))
+            .style(Style::default().bg(bg_secondary()).fg(fg_primary()))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(BORDER));
+            .border_style(Style::default().fg(border()));
         frame.render_widget(block, palette_area);
 
         let inner = Rect {
@@ -72,21 +72,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
         let search_line = if search.is_empty() && !*search_focused {
             Line::from(vec![
-                Span::styled("/ to search", Style::default().fg(FG_MUTED)),
+                Span::styled("/ to search", Style::default().fg(fg_muted())),
                 Span::raw("  "),
                 Span::styled(
                     "up/down navigate  Enter select  Esc close",
-                    Style::default().fg(FG_MUTED),
+                    Style::default().fg(fg_muted()),
                 ),
             ])
         } else {
             Line::from(vec![
-                Span::styled("> ", Style::default().fg(ACCENT)),
-                Span::styled(search.as_str(), Style::default().fg(FG_PRIMARY)),
+                Span::styled("> ", Style::default().fg(accent())),
+                Span::styled(search.as_str(), Style::default().fg(fg_primary())),
                 Span::styled(
                     "_",
                     Style::default()
-                        .fg(FG_PRIMARY)
+                        .fg(fg_primary())
                         .add_modifier(Modifier::SLOW_BLINK),
                 ),
             ])
@@ -103,7 +103,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
         let sep = Span::styled(
             "\u{2500}".repeat(inner.width as usize),
-            Style::default().fg(BORDER),
+            Style::default().fg(border()),
         );
         frame.render_widget(
             Line::from(sep),
@@ -117,24 +117,45 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
         let filtered = filter_indices(search);
         let list_y = inner.y + 2;
-        let list_h = inner.height.saturating_sub(3);
+        let list_h = inner.height.saturating_sub(3) as usize;
+        let total = filtered.len();
+
+        let scroll = if total <= list_h {
+            0
+        } else {
+            let half = list_h / 2;
+            if *selected < half {
+                0
+            } else if *selected >= total.saturating_sub(list_h - half) {
+                total.saturating_sub(list_h)
+            } else {
+                *selected - half
+            }
+        };
+
         let mut current_y = list_y;
         let mut render_idx = 0;
-
         let mut last_group = "";
 
         for (vis_idx, &cmd_idx) in filtered.iter().enumerate() {
-            if render_idx >= list_h as usize {
+            if vis_idx < scroll {
+                if search.is_empty() {
+                    let cmd = &COMMANDS[cmd_idx];
+                    last_group = cmd.group;
+                }
+                continue;
+            }
+            if render_idx >= list_h {
                 break;
             }
 
             let cmd = &COMMANDS[cmd_idx];
 
             if cmd.group != last_group && search.is_empty() {
-                if current_y < list_y + list_h {
+                if current_y < list_y + list_h as u16 {
                     let group_line = Line::from(vec![Span::styled(
                         cmd.group.to_uppercase(),
-                        Style::default().fg(FG_MUTED).add_modifier(Modifier::BOLD),
+                        Style::default().fg(fg_muted()).add_modifier(Modifier::BOLD),
                     )]);
                     frame.render_widget(
                         group_line,
@@ -151,22 +172,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 last_group = cmd.group;
             }
 
-            if current_y >= list_y + list_h {
+            if current_y >= list_y + list_h as u16 {
                 break;
             }
 
             let is_selected = vis_idx == *selected;
             let bg = if is_selected {
-                BG_PRIMARY
+                bg_primary()
             } else {
-                BG_SECONDARY
+                bg_secondary()
             };
             let fg = if is_selected {
-                FG_PRIMARY
+                fg_primary()
             } else {
-                FG_SECONDARY
+                fg_secondary()
             };
-            let border = if is_selected { ACCENT } else { BG_SECONDARY };
+            let border = if is_selected {
+                accent()
+            } else {
+                bg_secondary()
+            };
 
             let mut spans = vec![
                 Span::styled(
@@ -184,7 +209,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 spans.push(Span::raw(" ".repeat(pad as usize)));
                 spans.push(Span::styled(
                     cmd.shortcut,
-                    Style::default().fg(ACCENT).bg(BG_TERTIARY),
+                    Style::default().fg(accent()).bg(bg_tertiary()),
                 ));
             }
 
@@ -205,7 +230,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         if filtered.is_empty() {
             let empty = Line::from(vec![Span::styled(
                 "No commands found",
-                Style::default().fg(FG_MUTED),
+                Style::default().fg(fg_muted()),
             )]);
             frame.render_widget(
                 empty,
@@ -220,12 +245,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
         let footer_y = inner.y + inner.height.saturating_sub(1);
         let footer = Line::from(vec![
-            Span::styled("Esc ", Style::default().fg(ACCENT)),
-            Span::styled("close  ", Style::default().fg(FG_MUTED)),
-            Span::styled("up/down ", Style::default().fg(ACCENT)),
-            Span::styled("navigate  ", Style::default().fg(FG_MUTED)),
-            Span::styled("Enter ", Style::default().fg(ACCENT)),
-            Span::styled("select", Style::default().fg(FG_MUTED)),
+            Span::styled("Esc ", Style::default().fg(accent())),
+            Span::styled("close  ", Style::default().fg(fg_muted())),
+            Span::styled("up/down ", Style::default().fg(accent())),
+            Span::styled("navigate  ", Style::default().fg(fg_muted())),
+            Span::styled("Enter ", Style::default().fg(accent())),
+            Span::styled("select", Style::default().fg(fg_muted())),
         ]);
         frame.render_widget(
             footer,
