@@ -442,11 +442,17 @@ impl SessionState {
             .send(ServerEvent::SpaceUpdated(self.collect_space_info().await));
     }
 
-    pub async fn resize_split(&self, _tab_id: TabId, first_pane: PaneId, ratio: f32) {
+    pub async fn resize_split(
+        &self,
+        _tab_id: TabId,
+        first_pane: PaneId,
+        second_pane: PaneId,
+        ratio: f32,
+    ) {
         {
             let mut tabs = self.tabs.write().await;
             for tab in tabs.values_mut() {
-                if tab.layout.set_split_ratio(first_pane, ratio) {
+                if tab.layout.set_split_ratio(first_pane, second_pane, ratio) {
                     break;
                 }
             }

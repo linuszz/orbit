@@ -86,8 +86,11 @@ async fn main() -> Result<()> {
     let (event_bus, _rx) = broadcast::channel::<ServerEvent>(256);
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-    let space_manager =
-        Arc::new(SpaceManager::new(event_bus, shell, ".".to_string(), 80, 24).await?);
+    let cwd = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or_else(|| ".".to_string());
+    let space_manager = Arc::new(SpaceManager::new(event_bus, shell, cwd, 80, 24).await?);
     info!("orbitd ready — 1 space, 1 pane");
 
     tokio::select! {
