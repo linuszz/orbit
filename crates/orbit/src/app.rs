@@ -68,7 +68,7 @@ pub enum InputMode {
     Scroll {
         offset: usize,
     },
-    /// Keyboard navigation mode for the Satellites panel (prefix+a).
+    /// Keyboard navigation mode for the Agent Fleet panel (prefix+a).
     AgentPanel {
         selected: usize,
     },
@@ -143,6 +143,12 @@ pub static COMMANDS: &[CommandDef] = &[
         shortcut: "d",
     },
     CommandDef {
+        id: "toggle_theme",
+        label: "Toggle Theme",
+        group: "View",
+        shortcut: "T",
+    },
+    CommandDef {
         id: "help",
         label: "Show Help",
         group: "Help",
@@ -150,13 +156,13 @@ pub static COMMANDS: &[CommandDef] = &[
     },
     CommandDef {
         id: "agent_scroll_up",
-        label: "Scroll Satellites Up",
+        label: "Scroll Agent Fleet Up",
         group: "Satellite",
         shortcut: "k",
     },
     CommandDef {
         id: "agent_scroll_down",
-        label: "Scroll Satellites Down",
+        label: "Scroll Agent Fleet Down",
         group: "Satellite",
         shortcut: "j",
     },
@@ -188,10 +194,13 @@ impl PaneState {
     }
 
     pub fn sync_from_server(&mut self, grid: &CellGrid) {
+        self.parser.grid.cols = grid.cols;
+        self.parser.grid.rows = grid.rows;
         self.parser.grid.cells = grid.cells.clone();
-        self.parser.grid.cursor_x = grid.cursor_x;
-        self.parser.grid.cursor_y = grid.cursor_y;
-        self.parser.grid.resize(grid.cols, grid.rows);
+        self.parser.grid.cursor_x = grid.cursor_x.min(grid.cols.saturating_sub(1));
+        self.parser.grid.cursor_y = grid.cursor_y.min(grid.rows.saturating_sub(1));
+        self.parser.grid.scroll_top = 0;
+        self.parser.grid.scroll_bottom = grid.rows.saturating_sub(1);
         self.parser.reset_parser();
     }
 }
@@ -253,7 +262,8 @@ pub struct App {
     /// Increments every animation tick (16 ms) while any agent is Working or Blocked.
     pub tick_count: u64,
     pub drag_tab: Option<usize>,
-    pub drag_split: Option<(PaneId, SplitDir)>,
+    pub drag_split: Option<(PaneId, PaneId, SplitDir, f32)>,
+    pub theme_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -413,6 +423,7 @@ impl App {
             tick_count: 0,
             drag_tab: None,
             drag_split: None,
+            theme_name: "orbit".to_string(),
         }
     }
 
@@ -760,6 +771,7 @@ impl App {
                 }
 
                 if self.tabs.is_empty() {
+                    eprintln!("Exiting: SpaceUpdated with empty tabs");
                     self.should_quit = true;
                 }
                 self.needs_redraw = true;
@@ -776,6 +788,7 @@ impl App {
                 self.needs_redraw = true;
             }
             ServerEvent::SpaceClosed(_) => {
+                eprintln!("Exiting: SpaceClosed received");
                 self.should_quit = true;
                 self.needs_redraw = true;
             }
@@ -844,5 +857,28 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_from_server_different_dimensions() {
+        let mut pane = PaneState::new(80, 24);
+        let server_grid = orbit_protocol::CellGrid {
+            cols: 120,
+            rows: 30,
+            cells: vec![orbit_protocol::Cell::default(); 120 * 30],
+            cursor_x: 10,
+            cursor_y: 5,
+        };
+        pane.sync_from_server(&server_grid);
+        assert_eq!(pane.parser.grid.cols, 120);
+        assert_eq!(pane.parser.grid.rows, 30);
+        assert_eq!(pane.parser.grid.cells.len(), 120 * 30);
+        assert_eq!(pane.parser.grid.cursor_x, 10);
+        assert_eq!(pane.parser.grid.cursor_y, 5);
     }
 }

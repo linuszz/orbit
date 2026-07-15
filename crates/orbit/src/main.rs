@@ -30,7 +30,11 @@ async fn main() -> Result<()> {
     let term_cols = terminal.size()?.width;
     let term_rows = terminal.size()?.height;
 
-    let sidebar_w: u16 = 14;
+    let sidebar_w: u16 = if term_cols < 80 {
+        tui::SIDEBAR_COLLAPSED_W
+    } else {
+        tui::SIDEBAR_W
+    };
     let total_cols = term_cols.saturating_sub(sidebar_w).max(20);
     let total_rows = term_rows.saturating_sub(3).max(5);
 
