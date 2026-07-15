@@ -58,20 +58,25 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
 }
 
 fn content_area(term_size: ratatui::layout::Rect, app: &App) -> ratatui::layout::Rect {
-    // §6.7: Compact (<80 cols) collapses sidebar and hides agent panel.
-    let sidebar_w = if term_size.width < 80 {
+    compute_pane_area(term_size.width, term_size.height, app)
+}
+
+fn compute_pane_area(term_cols: u16, term_rows: u16, app: &App) -> ratatui::layout::Rect {
+    let sidebar_w: u16 = if term_cols < 80 {
         SIDEBAR_COLLAPSED_W
     } else if app.sidebar_visible {
         SIDEBAR_W
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = agent_panel_width(term_size.width, app.agent_panel_visible);
+    let agent_w = agent_panel_width(term_cols, app.agent_panel_visible);
+    let total_cols = term_cols.saturating_sub(sidebar_w + agent_w).max(20);
+    let total_rows = term_rows.saturating_sub(2).max(5);
     ratatui::layout::Rect {
         x: sidebar_w,
-        y: 1, // below tab bar
-        width: term_size.width.saturating_sub(sidebar_w + agent_w),
-        height: term_size.height.saturating_sub(2), // above status bar
+        y: 1,
+        width: total_cols,
+        height: total_rows,
     }
 }
 
@@ -109,6 +114,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
                 .await;
         }
         "scroll_mode" => {
+            app.selection = None;
             app.mode = InputMode::Scroll { offset: 1 };
         }
         "new_tab" => {
@@ -173,6 +179,14 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
             }
         }
         "detach" => app.should_quit = true,
+        "toggle_theme" => {
+            app.theme_name = if app.theme_name == "orbit" {
+                "tokyo-night".to_string()
+            } else {
+                "orbit".to_string()
+            };
+            crate::tui::theme::set_theme(&app.theme_name);
+        }
         "help" => app.show_help = true,
         _ => {}
     }
@@ -384,6 +398,45 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                 }
                 app.needs_redraw = true;
                 return;
+            }
+
+            if search.is_empty() {
+                let layout = &app.tabs[app.active_tab].pane_tree;
+                let target = match key.code {
+                    KeyCode::Left => layout.find_pane_in_direction(
+                        app.active_pane,
+                        orbit_protocol::SplitDir::Horizontal,
+                        false,
+                    ),
+                    KeyCode::Right => layout.find_pane_in_direction(
+                        app.active_pane,
+                        orbit_protocol::SplitDir::Horizontal,
+                        true,
+                    ),
+                    KeyCode::Up => layout.find_pane_in_direction(
+                        app.active_pane,
+                        orbit_protocol::SplitDir::Vertical,
+                        false,
+                    ),
+                    KeyCode::Down => layout.find_pane_in_direction(
+                        app.active_pane,
+                        orbit_protocol::SplitDir::Vertical,
+                        true,
+                    ),
+                    _ => None,
+                };
+                if let Some(target_pane) = target {
+                    app.active_pane = target_pane;
+                    app.mode = InputMode::Normal;
+                    let _ = writer
+                        .send(ClientMessage::FocusPane {
+                            tab_id: app.active_tab_id,
+                            pane_id: target_pane,
+                        })
+                        .await;
+                    app.needs_redraw = true;
+                    return;
+                }
             }
 
             let filtered = filtered_indices(search);
@@ -607,30 +660,32 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
     }
 }
 
+fn resize_local_grids_for_areas(
+    app: &mut App,
+    areas: &[(orbit_protocol::PaneId, ratatui::layout::Rect)],
+) {
+    for (pid, rect) in areas {
+        let pc = rect.width.saturating_sub(2).max(1);
+        let pr = rect.height.saturating_sub(2).max(1);
+        if let Some(pane) = app.panes.get_mut(pid) {
+            pane.parser.grid.resize(pc, pr);
+        }
+    }
+}
+
+fn resize_local_grids(app: &mut App, term_cols: u16, term_rows: u16) {
+    let pane_area = compute_pane_area(term_cols, term_rows, app);
+    let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+    resize_local_grids_for_areas(app, &areas);
+}
+
 async fn send_pane_resizes(app: &mut App, writer: &IpcWriter, term_cols: u16, term_rows: u16) {
-    let sidebar_w: u16 = if term_cols < 80 {
-        SIDEBAR_COLLAPSED_W
-    } else if app.sidebar_visible {
-        SIDEBAR_W
-    } else {
-        SIDEBAR_COLLAPSED_W
-    };
-    let agent_w = agent_panel_width(term_cols, app.agent_panel_visible);
-    let total_cols = term_cols.saturating_sub(sidebar_w + agent_w).max(20);
-    let total_rows = term_rows.saturating_sub(2).max(5);
-    let pane_area = ratatui::layout::Rect {
-        x: sidebar_w,
-        y: 1,
-        width: total_cols,
-        height: total_rows,
-    };
+    resize_local_grids(app, term_cols, term_rows);
+    let pane_area = compute_pane_area(term_cols, term_rows, app);
     let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
     for (pid, rect) in areas {
-        let pc = rect.width.saturating_sub(2);
-        let pr = rect.height.saturating_sub(2);
-        if let Some(pane) = app.panes.get_mut(&pid) {
-            pane.parser.grid.resize(pc.max(1), pr.max(1));
-        }
+        let pc = rect.width.saturating_sub(2).max(1);
+        let pr = rect.height.saturating_sub(2).max(1);
         let _ = writer
             .send(ClientMessage::ResizePane {
                 tab_id: app.active_tab_id,
@@ -649,6 +704,8 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
     app.needs_redraw = true;
 
     loop {
+        crate::tui::theme::set_theme(&app.theme_name);
+
         if app.needs_redraw {
             terminal.draw(|frame| render(frame, app))?;
             app.needs_redraw = false;
@@ -661,6 +718,7 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
         }
 
         if app.should_quit {
+            eprintln!("Exiting: should_quit=true");
             break;
         }
 
@@ -679,7 +737,7 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                 match event_result {
                     Ok(event) => app.handle_server_event(&event),
                     Err(e) => {
-                        debug!("server disconnected: {e:#}");
+                        eprintln!("Exiting: server disconnected: {e:#}");
                         app.server_connected = false;
                         app.should_quit = true;
                     }
@@ -702,7 +760,10 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                         handle_mouse(mouse, app, &writer, term_rect).await;
                     }
                     Some(Err(e)) => debug!("event stream error: {e}"),
-                    None => break,
+                    None => {
+                        eprintln!("Exiting: event stream closed");
+                        break;
+                    }
                     _ => {}
                 }
             }
@@ -898,7 +959,7 @@ async fn handle_mouse(
     writer: &IpcWriter,
     term_size: ratatui::layout::Rect,
 ) {
-    if let Some(menu) = app.context_menu.clone() {
+    let ctx_info = app.context_menu.as_ref().map(|menu| {
         let menu_w: u16 = menu
             .items
             .iter()
@@ -911,27 +972,37 @@ async fn handle_mouse(
             .max()
             .unwrap_or(16) as u16
             + 4;
-        // Items are rendered at menu_area.y + 1 + i (border offset)
-        let menu_y = menu.y;
+        let is_action: Vec<bool> = menu
+            .items
+            .iter()
+            .map(|item| matches!(item, ContextMenuItem::Action { .. }))
+            .collect();
+        (menu.x, menu.y, menu_w, is_action)
+    });
 
+    if let Some((menu_x, menu_y, menu_w, is_action)) = ctx_info {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                for (i, item) in menu.items.iter().enumerate() {
-                    if let ContextMenuItem::Action { .. } = item {
-                        if mouse.row == menu_y + 1 + i as u16
-                            && mouse.column >= menu.x
-                            && mouse.column < menu.x + menu_w
-                        {
+                let mut clicked: Option<(&'static str, crate::app::ContextMenuTarget)> = None;
+                for (i, &is_act) in is_action.iter().enumerate() {
+                    if is_act
+                        && mouse.row == menu_y + 1 + i as u16
+                        && mouse.column >= menu_x
+                        && mouse.column < menu_x + menu_w
+                    {
+                        if let Some(menu) = &app.context_menu {
                             if let Some(ContextMenuItem::Action { id, .. }) = menu.items.get(i) {
-                                let id = *id;
-                                let target = menu.target.clone();
-                                app.context_menu = None;
-                                app.needs_redraw = true;
-                                execute_context_action(id, &target, app, writer).await;
+                                clicked = Some((*id, menu.target.clone()));
                             }
-                            return;
                         }
+                        break;
                     }
+                }
+                if let Some((id, target)) = clicked {
+                    app.context_menu = None;
+                    app.needs_redraw = true;
+                    execute_context_action(id, &target, app, writer).await;
+                    return;
                 }
                 app.close_context_menu();
             }
@@ -940,14 +1011,13 @@ async fn handle_mouse(
             }
             MouseEventKind::Moved => {
                 let mut new_selected = 0;
-                for (i, item) in menu.items.iter().enumerate() {
-                    if mouse.row == menu_y + 1 + i as u16
-                        && mouse.column >= menu.x
-                        && mouse.column < menu.x + menu_w
+                for (i, &is_act) in is_action.iter().enumerate() {
+                    if is_act
+                        && mouse.row == menu_y + 1 + i as u16
+                        && mouse.column >= menu_x
+                        && mouse.column < menu_x + menu_w
                     {
-                        if let ContextMenuItem::Action { .. } = item {
-                            new_selected = i;
-                        }
+                        new_selected = i;
                     }
                 }
                 if let Some(ref mut m) = app.context_menu {
@@ -1023,7 +1093,7 @@ async fn handle_mouse(
                         app.needs_redraw = true;
                         return;
                     }
-                    // "[A] Satellites[badge] " — width varies with fleet badge.
+                    // "[A] Agent Fleet[badge] " — width varies with fleet badge.
                     let sats_badge_len: u16 = if !app.agent_panel_visible && !app.agents.is_empty()
                     {
                         if app.agents.len() < 10 {
@@ -1073,8 +1143,7 @@ async fn handle_mouse(
             if app.sidebar_visible && mouse.column < SIDEBAR_W {
                 let mut y: u16 = 2; // after header + divider
                 for (i, space) in app.spaces.iter().enumerate() {
-                    // card occupies 3 rows: name, cwd, stats
-                    if mouse.row >= y && mouse.row < y + 3 {
+                    if mouse.row >= y && mouse.row < y + 4 {
                         let space_id = space.space_id;
                         app.active_space_idx = i;
                         let _ = writer
@@ -1083,8 +1152,7 @@ async fn handle_mouse(
                         app.needs_redraw = true;
                         return;
                     }
-                    y += 3;
-                    // gap row between cards (not after last)
+                    y += 4;
                     if i + 1 < app.spaces.len() {
                         y += 1;
                     }
@@ -1127,6 +1195,7 @@ async fn handle_mouse(
                         app.agent_panel_visible = false;
                         app.mode = InputMode::Normal;
                         app.agent_hovered = None;
+                        app.selection = None;
                         app.needs_redraw = true;
                         return;
                     }
@@ -1320,13 +1389,13 @@ async fn handle_mouse(
             }
 
             let pane_area = content_area(term_size, app);
-            if let Some((first_pane, dir)) = crate::tui::find_split_at_cursor(
+            if let Some((first_pane, second_pane, dir)) = crate::tui::find_split_at_cursor(
                 app.pane_tree(),
                 pane_area,
                 mouse.column,
                 mouse.row,
             ) {
-                app.drag_split = Some((first_pane, dir));
+                app.drag_split = Some((first_pane, second_pane, dir, -1.0));
                 app.selection = None;
                 return;
             }
@@ -1416,13 +1485,18 @@ async fn handle_mouse(
                 } else {
                     ContextMenuTarget::Pane(app.active_pane)
                 };
+                app.drag_tab = None;
+                app.drag_split = None;
                 app.open_context_menu(mouse.column, mouse.row, target);
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            if let Some((first_pane, _dir)) = app.drag_split {
-                let pane_area = content_area(term_size, app);
-                let ratio = match _dir {
+            let pane_area = content_area(term_size, app);
+            if pane_area.width == 0 || pane_area.height == 0 {
+                return;
+            }
+            let drag_update = if let Some(drag) = app.drag_split.as_mut() {
+                let ratio = match drag.2 {
                     orbit_protocol::SplitDir::Horizontal => {
                         let total = pane_area.width as f32;
                         ((mouse.column as f32 - pane_area.x as f32) / total).clamp(0.1, 0.9)
@@ -1432,13 +1506,22 @@ async fn handle_mouse(
                         ((mouse.row as f32 - pane_area.y as f32) / total).clamp(0.1, 0.9)
                     }
                 };
-                let _ = writer
-                    .send(ClientMessage::ResizeSplit {
-                        tab_id: app.active_tab_id,
-                        first_pane,
-                        ratio,
-                    })
-                    .await;
+                if (ratio - drag.3).abs() >= 0.02 {
+                    drag.3 = ratio;
+                    Some((drag.0, drag.1, ratio))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some((first_pane, second_pane, ratio)) = drag_update {
+                if let Some(tab) = app.tabs.get_mut(app.active_tab) {
+                    tab.pane_tree
+                        .set_split_ratio(first_pane, second_pane, ratio);
+                }
+                resize_local_grids(app, term_size.width, term_size.height);
+                app.needs_redraw = true;
                 return;
             }
             let drag_info = app
@@ -1473,7 +1556,29 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {
-            app.drag_split = None;
+            if let Some((first_pane, second_pane, _dir, _)) = app.drag_split.take() {
+                let pane_area = content_area(term_size, app);
+                if pane_area.width > 0 && pane_area.height > 0 {
+                    let ratio = match _dir {
+                        orbit_protocol::SplitDir::Horizontal => {
+                            let total = pane_area.width as f32;
+                            ((mouse.column as f32 - pane_area.x as f32) / total).clamp(0.1, 0.9)
+                        }
+                        orbit_protocol::SplitDir::Vertical => {
+                            let total = pane_area.height as f32;
+                            ((mouse.row as f32 - pane_area.y as f32) / total).clamp(0.1, 0.9)
+                        }
+                    };
+                    let _ = writer
+                        .send(ClientMessage::ResizeSplit {
+                            tab_id: app.active_tab_id,
+                            first_pane,
+                            second_pane,
+                            ratio,
+                        })
+                        .await;
+                }
+            }
             if let Some(sel) = &mut app.selection {
                 sel.active = false;
                 if sel.start == sel.end {
@@ -1483,19 +1588,22 @@ async fn handle_mouse(
             }
             if let Some(from_idx) = app.drag_tab.take() {
                 if mouse.row == 0 && mouse.column >= sidebar_w {
-                    let mut x = sidebar_w;
-                    for (i, tab) in app.tabs.iter().enumerate() {
-                        let label_len = tab.name.len() as u16 + 2;
-                        if mouse.column >= x && mouse.column < x + label_len && i != from_idx {
-                            let _ = writer
-                                .send(ClientMessage::ReorderTab {
-                                    tab_id: app.tabs[from_idx].id,
-                                    to_index: i,
-                                })
-                                .await;
-                            break;
+                    if let Some(from_tab) = app.tabs.get(from_idx) {
+                        let from_tab_id = from_tab.id;
+                        let mut x = sidebar_w;
+                        for (i, tab) in app.tabs.iter().enumerate() {
+                            let label_len = tab.name.len() as u16 + 2;
+                            if mouse.column >= x && mouse.column < x + label_len && i != from_idx {
+                                let _ = writer
+                                    .send(ClientMessage::ReorderTab {
+                                        tab_id: from_tab_id,
+                                        to_index: i,
+                                    })
+                                    .await;
+                                break;
+                            }
+                            x += label_len;
                         }
-                        x += label_len;
                     }
                 }
             }
@@ -1567,7 +1675,7 @@ async fn handle_mouse(
                 if hovered.is_none() && col < acc + 3 {
                     hovered = Some(app.tabs.len());
                 }
-                // Check [A] Satellites button (right-aligned, width varies with fleet badge).
+                // Check [A] Agent Fleet button (right-aligned, width varies with fleet badge).
                 if hovered.is_none() {
                     let sats_badge_len: u16 = if !app.agent_panel_visible && !app.agents.is_empty()
                     {
@@ -1670,11 +1778,11 @@ async fn handle_mouse(
                 let mut y: u16 = 2;
                 let mut hovered = None;
                 for (i, _space) in app.spaces.iter().enumerate() {
-                    if mouse.row >= y && mouse.row < y + 3 {
+                    if mouse.row >= y && mouse.row < y + 4 {
                         hovered = Some(i);
                         break;
                     }
-                    y += 3;
+                    y += 4;
                     if i + 1 < app.spaces.len() {
                         y += 1;
                     }
