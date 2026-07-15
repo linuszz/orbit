@@ -1,61 +1,115 @@
-# orbit
+# Orbit
 
-> Orbit — A universal terminal workspace. Orbit any machine, command every process.
->
-> 环绕任何机器，掌控一切进程。
+A terminal multiplexer with integrated agent monitoring. Built in Rust.
 
-Orbit is a next-generation terminal workspace that unifies human command-line
-interaction with AI agent execution environments. It is built on a
-client-server architecture (the `orbit` TUI client and the `orbitd` daemon)
-inspired by tmux, extended with first-class agent runtime, multi-protocol
-image rendering over SSH, OSC 52 clipboard bridging, and a built-in file
-transfer channel.
+Orbit provides session management, pane splitting, and tabbed workspaces similar
+to tmux, with the addition of automatic detection and monitoring for AI coding
+agents (Claude Code, Codex, Aider, and others) running inside your sessions.
 
-**Status:** Phase 1 — *Mercury* (pre-alpha). Skeleton compiles; functionality
-not yet implemented.
+## Features
 
-## Repository layout
+**Session management**
+- Client-server architecture: sessions persist across client disconnects
+- Multi-space support: isolated workspaces with independent tabs and panes
+- Horizontal and vertical pane splitting with mouse-drag resizing
+- Tab management with drag-to-reorder
+- Mouse text selection, copy, and scrollback navigation
+- Command palette with fuzzy search (tmux-style prefix key)
 
-Design specifications live in the separate `02_design/` sibling directory
-(one level up from this repo). This repository contains only the
-implementation.
+**Agent monitoring**
+- Automatic detection via process scanning and PTY output pattern matching
+- Status tracking: working, blocked, error, idle, completed
+- Live resource metrics (CPU, memory)
+- Progress extraction from agent output
+- Intervention modal: respond to blocked agents without leaving the terminal
 
-```
-orbit/
-├── Cargo.toml              workspace root
-├── crates/
-│   ├── orbit/              binary: TUI client (Ground Station)
-│   ├── orbitd/             binary: daemon (Core)
-│   ├── orbit-protocol/     lib: shared wire types (IPC contract)
-│   └── orbit-core/         lib: domain model + VT emulation (no tokio)
-├── justfile                convenience build tasks
-└── claude.md               project context for AI-assisted development
-```
+**Display**
+- Built-in themes: Orbit (default) and Tokyo Night
+- Runtime theme switching
+- Full mouse support: focus, resize, select, context menus
 
 ## Quick start
 
 ```bash
-cargo build --workspace            # build all crates
-cargo run -p orbitd                # start the daemon
-cargo run -p orbit                 # attach the TUI client
-cargo test --workspace             # run the test suite
-cargo clippy --workspace -- -D warnings   # lint gate
+git clone https://github.com/linuszz/orbit.git
+cd orbit
+cargo run -p orbitd    # terminal 1: start the daemon
+cargo run -p orbit     # terminal 2: attach the TUI client
 ```
 
-If `just` is installed: `just dev`, `just daemon`, `just qa`.
+Requires Rust 1.75+ and Linux or macOS.
 
-## Phases
+## Key bindings
 
-| Phase | Codename  | Scope                                                |
-|-------|-----------|------------------------------------------------------|
-| 1     | Mercury   | Session/Pane TUI + PTY + IPC + SSH attach (this repo)|
-| 2     | Venus     | Agent detection, state machine, Monitor sidebar      |
-| 3     | Earth     | OSC 52 clipboard, Kitty/Sixel/iTerm images, files    |
-| 4     | Mars      | WASM plugin system, MCP client integration           |
+| Key | Action |
+|-----|--------|
+| `Ctrl+B` | Command palette |
+| `Ctrl+B` `h` / `v` | Split horizontal / vertical |
+| `Ctrl+B` `c` | New tab |
+| `Ctrl+B` `n` / `p` | Next / previous tab |
+| `Ctrl+B` `←` `→` `↑` `↓` | Navigate between panes |
+| `Ctrl+B` `[` | Scrollback mode (`j`/`k`/`g`/`G`) |
+| `Ctrl+B` `a` | Toggle agent panel |
+| `Ctrl+B` `b` | Toggle sidebar |
+| `Ctrl+B` `T` | Toggle theme |
+| `Ctrl+B` `?` | Help |
+| `Tab` | Cycle pane focus |
 
-See `claude.md` for the full project context, terminology mapping, and
-implementation conventions.
+Mouse: click to focus, drag to resize or reorder, right-click for context menu.
+
+## Architecture
+
+```
+┌───────────┐   Unix socket   ┌───────────┐
+│  orbit    │ ◄──────────────►│  orbitd   │
+│  (client) │   bincode 2.x   │ (daemon)  │
+└───────────┘                 └───────────┘
+```
+
+The client (`orbit`) is a ratatui-based TUI. The daemon (`orbitd`) owns all
+PTYs, manages sessions, and performs agent detection. Communication uses
+length-prefixed bincode over a Unix domain socket. Both sides maintain
+independent VT parsers.
+
+```
+crates/
+├── orbit/           # TUI client
+├── orbitd/          # Daemon
+├── orbit-protocol/  # IPC wire types (no tokio dependency)
+└── orbit-core/      # VT emulation and cell grid (no I/O)
+```
+
+## Roadmap
+
+| Status | Focus |
+|--------|-------|
+| Done | Terminal workspace: panes, tabs, PTY, IPC |
+| Done | Agent detection, monitoring, intervention |
+| Planned | Clipboard sync (OSC 52), image rendering, file transfer |
+| Planned | Plugin system (WASM), MCP client integration |
+
+## Development
+
+```bash
+just qa                 # format check + clippy + tests
+just dev / just daemon  # run client / daemon
+```
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0, at your option.
+Orbit is dual-licensed:
+
+- **AGPL-3.0** for open-source and community use. See [LICENSE](LICENSE).
+- **Commercial license** available on request for organizations that cannot
+  comply with AGPL terms (e.g., embedding Orbit in a closed-source product or
+  offering it as a managed service without disclosing modifications). Contact
+  the maintainer.
+
+Contributions require signing the [CLA](CLA.md). This allows the project to
+remain dual-licensed as it evolves.
