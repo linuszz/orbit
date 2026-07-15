@@ -87,4 +87,32 @@ mod tests {
         let (decoded, _): (ServerEvent, usize) = decode_message(payload).unwrap();
         assert!(matches!(decoded, ServerEvent::Ping));
     }
+
+    #[test]
+    fn resize_split_roundtrip() {
+        use crate::{PaneId, TabId};
+        let msg = ClientMessage::ResizeSplit {
+            tab_id: TabId(1),
+            first_pane: PaneId(2),
+            second_pane: PaneId(3),
+            ratio: 0.35,
+        };
+        let bytes = encode_message(&msg).unwrap();
+        let payload = &bytes[4..];
+        let (decoded, _): (ClientMessage, usize) = decode_message(payload).unwrap();
+        match decoded {
+            ClientMessage::ResizeSplit {
+                tab_id,
+                first_pane,
+                second_pane,
+                ratio,
+            } => {
+                assert_eq!(tab_id, TabId(1));
+                assert_eq!(first_pane, PaneId(2));
+                assert_eq!(second_pane, PaneId(3));
+                assert!((ratio - 0.35).abs() < f32::EPSILON);
+            }
+            other => panic!("expected ResizeSplit, got {other:?}"),
+        }
+    }
 }

@@ -162,8 +162,12 @@ impl PaneLayout {
         }
     }
 
-    pub fn set_split_ratio(&mut self, first_pane: PaneId, ratio: f32) -> bool {
-        let ratio = ratio.clamp(0.1, 0.9);
+    pub fn set_split_ratio(&mut self, first_pane: PaneId, second_pane: PaneId, ratio: f32) -> bool {
+        let ratio = if ratio.is_finite() {
+            ratio.clamp(0.1, 0.9)
+        } else {
+            0.5
+        };
         match self {
             PaneLayout::Leaf(_) => false,
             PaneLayout::Split {
@@ -172,16 +176,14 @@ impl PaneLayout {
                 ratio: r,
                 ..
             } => {
-                if first.leaves().contains(&first_pane) {
+                let first_leaf = first.leaves().first().copied();
+                let second_leaf = second.leaves().first().copied();
+                if first_leaf == Some(first_pane) && second_leaf == Some(second_pane) {
                     *r = ratio;
                     return true;
                 }
-                if second.leaves().contains(&first_pane) {
-                    *r = 1.0 - ratio;
-                    return true;
-                }
-                first.set_split_ratio(first_pane, ratio)
-                    || second.set_split_ratio(first_pane, ratio)
+                first.set_split_ratio(first_pane, second_pane, ratio)
+                    || second.set_split_ratio(first_pane, second_pane, ratio)
             }
         }
     }
@@ -216,6 +218,35 @@ impl PaneLayout {
                 let mut v = first.leaves();
                 v.extend(second.leaves());
                 v
+            }
+        }
+    }
+
+    pub fn find_pane_in_direction(
+        &self,
+        current: PaneId,
+        split_dir: SplitDir,
+        positive: bool,
+    ) -> Option<PaneId> {
+        match self {
+            PaneLayout::Leaf(_) => None,
+            PaneLayout::Split {
+                direction,
+                first,
+                second,
+                ..
+            } => {
+                let in_first = first.leaves().contains(&current);
+                let in_second = second.leaves().contains(&current);
+
+                if *direction == split_dir && ((positive && in_first) || (!positive && in_second)) {
+                    let target = if positive { second } else { first };
+                    target.leaves().first().copied()
+                } else {
+                    first
+                        .find_pane_in_direction(current, split_dir, positive)
+                        .or_else(|| second.find_pane_in_direction(current, split_dir, positive))
+                }
             }
         }
     }
@@ -262,4 +293,104 @@ pub struct ScrollbackLine {
     pub cells: Vec<Cell>,
     pub width: u16,
     pub seq: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_split_ratio_simple_split() {
+        let mut layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            first: Box::new(PaneLayout::Leaf(PaneId(1))),
+            second: Box::new(PaneLayout::Leaf(PaneId(2))),
+            ratio: 0.5,
+        };
+        assert!(layout.set_split_ratio(PaneId(1), PaneId(2), 0.3));
+        match layout {
+            PaneLayout::Split { ratio, .. } => assert!((ratio - 0.3).abs() < f32::EPSILON),
+            _ => panic!("expected split"),
+        }
+    }
+
+    #[test]
+    fn set_split_ratio_clamps_and_rejects_nan() {
+        let mut layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            first: Box::new(PaneLayout::Leaf(PaneId(1))),
+            second: Box::new(PaneLayout::Leaf(PaneId(2))),
+            ratio: 0.5,
+        };
+        assert!(layout.set_split_ratio(PaneId(1), PaneId(2), f32::NAN));
+        match layout {
+            PaneLayout::Split { ratio, .. } => {
+                assert!(ratio.is_finite());
+                assert!((0.1..=0.9).contains(&ratio));
+            }
+            _ => panic!("expected split"),
+        }
+    }
+
+    #[test]
+    fn set_split_ratio_leaf_no_op() {
+        let mut layout = PaneLayout::Leaf(PaneId(1));
+        assert!(!layout.set_split_ratio(PaneId(1), PaneId(2), 0.3));
+    }
+
+    #[test]
+    fn set_split_ratio_nested_inner_split() {
+        let mut layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            first: Box::new(PaneLayout::Split {
+                direction: SplitDir::Horizontal,
+                first: Box::new(PaneLayout::Leaf(PaneId(1))),
+                second: Box::new(PaneLayout::Leaf(PaneId(2))),
+                ratio: 0.5,
+            }),
+            second: Box::new(PaneLayout::Leaf(PaneId(3))),
+            ratio: 0.5,
+        };
+        assert!(layout.set_split_ratio(PaneId(1), PaneId(2), 0.7));
+        match layout {
+            PaneLayout::Split {
+                first: inner,
+                second,
+                ratio: outer_ratio,
+                ..
+            } => {
+                assert!((outer_ratio - 0.5).abs() < f32::EPSILON);
+                assert_eq!(second.leaves(), vec![PaneId(3)]);
+                match *inner {
+                    PaneLayout::Split { ratio, .. } => {
+                        assert!((ratio - 0.7).abs() < f32::EPSILON)
+                    }
+                    _ => panic!("expected inner split"),
+                }
+            }
+            _ => panic!("expected outer split"),
+        }
+    }
+
+    #[test]
+    fn set_split_ratio_nested_outer_split() {
+        let mut layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            first: Box::new(PaneLayout::Split {
+                direction: SplitDir::Horizontal,
+                first: Box::new(PaneLayout::Leaf(PaneId(1))),
+                second: Box::new(PaneLayout::Leaf(PaneId(2))),
+                ratio: 0.5,
+            }),
+            second: Box::new(PaneLayout::Leaf(PaneId(3))),
+            ratio: 0.5,
+        };
+        assert!(layout.set_split_ratio(PaneId(1), PaneId(3), 0.2));
+        match layout {
+            PaneLayout::Split { ratio, .. } => {
+                assert!((ratio - 0.2).abs() < f32::EPSILON)
+            }
+            _ => panic!("expected outer split"),
+        }
+    }
 }

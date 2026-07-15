@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Capabilities {
@@ -70,6 +70,7 @@ pub enum ClientMessage {
     ResizeSplit {
         tab_id: crate::TabId,
         first_pane: crate::PaneId,
+        second_pane: crate::PaneId,
         ratio: f32,
     },
 
