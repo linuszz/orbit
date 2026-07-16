@@ -40,6 +40,12 @@ async fn main() -> Result<()> {
 
     let mut app = App::from_welcome(&state, total_cols, total_rows);
 
+    let settings = crate::app::load_settings();
+    app.theme_name = settings.theme.clone();
+    app.sidebar_visible = settings.sidebar_visible;
+    app.agent_panel_visible = settings.agent_panel_visible;
+    crate::tui::theme::set_theme(&app.theme_name);
+
     let pane_area = ratatui::layout::Rect {
         x: 0,
         y: 0,

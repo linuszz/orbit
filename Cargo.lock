@@ -1140,7 +1140,9 @@ dependencies = [
  "orbit-core",
  "orbit-protocol",
  "ratatui",
+ "serde",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

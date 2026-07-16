@@ -7,6 +7,54 @@ use orbit_protocol::{
     ServerEvent, SpaceId, SplitDir, TabId,
 };
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct UserSettings {
+    pub theme: String,
+    pub sidebar_visible: bool,
+    pub agent_panel_visible: bool,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            theme: "orbit".to_string(),
+            sidebar_visible: true,
+            agent_panel_visible: false,
+        }
+    }
+}
+
+fn settings_path() -> std::path::PathBuf {
+    let base = std::env::var("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|_| std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    base.join("orbit").join("settings.toml")
+}
+
+pub fn load_settings() -> UserSettings {
+    let path = settings_path();
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| toml::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_settings(app: &App) {
+    let settings = UserSettings {
+        theme: app.theme_name.clone(),
+        sidebar_visible: app.sidebar_visible,
+        agent_panel_visible: app.agent_panel_visible,
+    };
+    let path = settings_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(s) = toml::to_string_pretty(&settings) {
+        let _ = std::fs::write(path, s);
+    }
+}
+
 // Fields consumed by Task 4 (sidebar rendering); suppressing dead_code until then.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -149,6 +197,12 @@ pub static COMMANDS: &[CommandDef] = &[
         shortcut: "T",
     },
     CommandDef {
+        id: "settings",
+        label: "Settings",
+        group: "View",
+        shortcut: ",",
+    },
+    CommandDef {
         id: "help",
         label: "Show Help",
         group: "Help",
@@ -264,6 +318,8 @@ pub struct App {
     pub drag_tab: Option<usize>,
     pub drag_split: Option<(PaneId, PaneId, SplitDir, f32)>,
     pub theme_name: String,
+    pub settings_open: bool,
+    pub settings_selected: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -424,6 +480,8 @@ impl App {
             drag_tab: None,
             drag_split: None,
             theme_name: "orbit".to_string(),
+            settings_open: false,
+            settings_selected: 0,
         }
     }
 
@@ -742,6 +800,7 @@ impl App {
                 let mut new_tabs = Vec::new();
                 let mut new_active_idx = 0;
                 let mut found_active = false;
+                let mut matched_active_tab_id = info.active_tab;
                 for (i, tab_info) in info.tabs.iter().enumerate() {
                     new_tabs.push(Tab {
                         id: tab_info.id,
@@ -751,22 +810,28 @@ impl App {
                     if tab_info.id == info.active_tab {
                         new_active_idx = i;
                         found_active = true;
+                        matched_active_tab_id = tab_info.id;
                     }
                 }
                 if !new_tabs.is_empty() {
+                    let prev_active_tab_id = self.active_tab_id;
                     self.tabs = new_tabs;
                     self.active_tab = if found_active { new_active_idx } else { 0 };
-                    self.active_tab_id = info.active_tab;
-                    if let Some(active_tab) = self.tabs.get(self.active_tab) {
-                        let server_active = info
-                            .tabs
-                            .iter()
-                            .find(|t| t.id == info.active_tab)
-                            .map(|t| t.active_pane);
-                        self.active_pane = server_active
-                            .filter(|&pid| self.panes.contains_key(&pid))
-                            .or_else(|| active_tab.pane_tree.leaves().first().copied())
-                            .unwrap_or(self.active_pane);
+                    self.active_tab_id = matched_active_tab_id;
+                    let tab_changed = prev_active_tab_id != self.active_tab_id
+                        || !self.panes.contains_key(&self.active_pane);
+                    if tab_changed {
+                        if let Some(active_tab) = self.tabs.get(self.active_tab) {
+                            let server_active = info
+                                .tabs
+                                .iter()
+                                .find(|t| t.id == self.active_tab_id)
+                                .map(|t| t.active_pane);
+                            self.active_pane = server_active
+                                .filter(|&pid| self.panes.contains_key(&pid))
+                                .or_else(|| active_tab.pane_tree.leaves().first().copied())
+                                .unwrap_or(self.active_pane);
+                        }
                     }
                 }
 
