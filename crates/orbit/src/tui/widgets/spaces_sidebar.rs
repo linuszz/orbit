@@ -2,7 +2,7 @@ use orbit_protocol::AgentStatus;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
@@ -21,6 +21,11 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     let mut y = area.y;
     let x = area.x;
     let sep_x = area.x + area.width - 1;
+
+    frame.render_widget(
+        Block::default().style(Style::default().bg(bg_primary())),
+        area,
+    );
 
     // Header: « collapse button on the LEFT (cols 0-2), keeping it far from the tab bar edge.
     // This prevents accidental tab-bar clicks from triggering sidebar collapse.
@@ -61,7 +66,7 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
     y += 1;
 
     // Reserve 2 rows at the bottom: one divider + one button bar.
-    let bottom_content = area.y + area.height.saturating_sub(2);
+    let bottom_content = area.y + area.height.saturating_sub(3);
 
     for (i, space) in app.spaces.iter().enumerate() {
         if y + 4 > bottom_content {
@@ -70,14 +75,6 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
 
         let is_active = i == app.active_space_idx;
         let is_hovered = app.sidebar_hovered == Some(i);
-
-        let card_bg = if is_active {
-            accent()
-        } else if is_hovered {
-            accent_hover()
-        } else {
-            bg_secondary()
-        };
 
         // Name row
         let name_trunc = truncate(&space.name, (w as usize).saturating_sub(1));
@@ -89,9 +86,9 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         let (name_bg, name_fg, name_mod) = if is_active {
             (accent(), bg_primary(), Modifier::BOLD)
         } else if is_hovered {
-            (accent_hover(), fg_primary(), Modifier::empty())
+            (accent_hover(), fg_primary(), Modifier::BOLD)
         } else {
-            (bg_secondary(), fg_secondary(), Modifier::empty())
+            (bg_secondary(), fg_primary(), Modifier::empty())
         };
         frame.render_widget(
             Paragraph::new(Span::styled(
@@ -125,9 +122,9 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         let (cwd_bg, cwd_fg) = if is_active {
             (accent(), bg_primary())
         } else if is_hovered {
-            (accent_hover(), fg_primary())
+            (accent_hover(), fg_secondary())
         } else {
-            (bg_secondary(), fg_muted())
+            (bg_secondary(), fg_secondary())
         };
         frame.render_widget(
             Paragraph::new(Span::styled(
@@ -178,9 +175,9 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         let (stats_bg, stats_fg) = if is_active {
             (accent(), bg_primary())
         } else if is_hovered {
-            (accent_hover(), fg_primary())
+            (accent_hover(), fg_secondary())
         } else {
-            (bg_secondary(), fg_muted())
+            (bg_secondary(), fg_secondary())
         };
         // Color the agent badge by urgency (only on non-active rows so it's visible).
         let badge_color = if is_active || is_hovered {
@@ -223,7 +220,10 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
         y += 1;
 
         frame.render_widget(
-            Paragraph::new("").style(Style::default().bg(card_bg)),
+            Paragraph::new(Span::styled(
+                "\u{2500}".repeat(w as usize),
+                Style::default().fg(border()).bg(bg_primary()),
+            )),
             Rect {
                 x,
                 y,
@@ -232,20 +232,6 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
             },
         );
         y += 1;
-
-        // Gap row between cards (not after the last one)
-        if i + 1 < app.spaces.len() && y < bottom_content {
-            frame.render_widget(
-                Paragraph::new("").style(Style::default().bg(bg_primary())),
-                Rect {
-                    x,
-                    y,
-                    width: w,
-                    height: 1,
-                },
-            );
-            y += 1;
-        }
     }
 
     // Bottom divider — separates card list from action buttons
@@ -308,47 +294,68 @@ fn render_expanded(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_collapsed(frame: &mut Frame, area: Rect, app: &App) {
-    let w = area.width; // should be 2
     let x = area.x;
+    let bg = bg_secondary();
+    let w = area.width;
+    let last_row = area.height.saturating_sub(1);
+    let btn2_row = area.height.saturating_sub(2);
+    let mid_col = w / 2;
 
-    // Expand hint at top (row 0) — right-aligned to match the space number labels below
-    let expand_fg = if app.sidebar_toggle_hovered {
-        accent()
-    } else {
-        fg_muted()
-    };
-    frame.render_widget(
-        Paragraph::new(Span::styled(" \u{00BB}", Style::default().fg(expand_fg))),
-        Rect {
-            x,
-            y: area.y,
-            width: w,
-            height: 1,
-        },
-    );
+    for row in 0..area.height {
+        let y = area.y + row;
 
-    // Space numbers starting at row 1
-    for (i, _space) in app.spaces.iter().enumerate() {
-        let y = area.y + 1 + i as u16;
-        if y >= area.y + area.height {
-            break;
-        }
-        let is_active = i == app.active_space_idx;
-        let (fg, bg) = if is_active {
-            (bg_primary(), accent())
+        let is_btn_plus = row == btn2_row;
+        let is_btn_cmd = row == last_row;
+        let btn_hover = if is_btn_plus {
+            app.sidebar_hovered == Some(app.spaces.len())
+        } else if is_btn_cmd {
+            app.sidebar_hovered == Some(app.spaces.len() + 1)
         } else {
-            (fg_muted(), bg_secondary())
+            false
         };
-        let label = format!("{:>2}", i + 1);
-        frame.render_widget(
-            Paragraph::new(Span::styled(label, Style::default().fg(fg).bg(bg))),
-            Rect {
-                x,
-                y,
-                width: w,
-                height: 1,
-            },
-        );
+
+        let (ch, fg_val, bg_val) = if row == 0 {
+            let fg = if app.sidebar_toggle_hovered {
+                accent()
+            } else {
+                fg_muted()
+            };
+            ('\u{00BB}', fg, bg)
+        } else if is_btn_cmd {
+            let fg = if btn_hover { fg_primary() } else { fg_muted() };
+            let bg_btn = if btn_hover { accent_hover() } else { bg_card() };
+            ('\u{2261}', fg, bg_btn)
+        } else if is_btn_plus {
+            let fg = if btn_hover { fg_primary() } else { fg_muted() };
+            let bg_btn = if btn_hover { accent_hover() } else { bg_card() };
+            ('+', fg, bg_btn)
+        } else {
+            let sr = row - 1;
+            if (sr as usize) < app.spaces.len() {
+                let is_active = sr as usize == app.active_space_idx;
+                let digit = char::from_digit((sr + 1) as u32, 10).unwrap_or(' ');
+                if is_active {
+                    (digit, bg_primary(), accent())
+                } else {
+                    (digit, fg_muted(), bg)
+                }
+            } else {
+                (' ', fg_muted(), bg)
+            }
+        };
+
+        for col in 0..w {
+            let (cell_ch, cell_style) = if col == 0 || col == w - 1 {
+                ('\u{2502}', Style::default().fg(border()).bg(bg_primary()))
+            } else if col == mid_col {
+                (ch, Style::default().fg(fg_val).bg(bg_val))
+            } else {
+                (' ', Style::default().bg(bg_val))
+            };
+            if let Some(cell) = frame.buffer_mut().cell_mut((x + col, y)) {
+                cell.set_char(cell_ch).set_style(cell_style);
+            }
+        }
     }
 }
 
