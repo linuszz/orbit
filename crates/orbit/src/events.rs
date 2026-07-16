@@ -71,7 +71,7 @@ fn compute_pane_area(term_cols: u16, term_rows: u16, app: &App) -> ratatui::layo
     };
     let agent_w = agent_panel_width(term_cols, app.agent_panel_visible);
     let total_cols = term_cols.saturating_sub(sidebar_w + agent_w).max(20);
-    let total_rows = term_rows.saturating_sub(2).max(5);
+    let total_rows = term_rows.saturating_sub(3).max(5);
     ratatui::layout::Rect {
         x: sidebar_w,
         y: 1,
@@ -136,24 +136,25 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
                 })
                 .await;
         }
-        "toggle_sidebar" => app.sidebar_visible = !app.sidebar_visible,
+        "toggle_sidebar" => {
+            app.sidebar_visible = !app.sidebar_visible;
+            crate::app::save_settings(app);
+        }
         "toggle_agent" => {
             app.agent_panel_visible = !app.agent_panel_visible;
             if app.agent_panel_visible {
-                // Enter keyboard nav mode when opening panel.
                 let sel = if let InputMode::AgentPanel { selected } = app.mode {
                     selected
                 } else {
                     0
                 };
                 app.mode = InputMode::AgentPanel { selected: sel };
-                // Clamp scroll so the selected card is always on-screen.
-                // (scroll_offset may be > sel if commands were issued while in Normal mode.)
                 app.agent_scroll_offset = app.agent_scroll_offset.min(sel);
             } else {
                 app.mode = InputMode::Normal;
                 app.agent_hovered = None;
             }
+            crate::app::save_settings(app);
         }
         "agent_scroll_up" => {
             if app.agent_panel_visible {
@@ -186,6 +187,11 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
                 "orbit".to_string()
             };
             crate::tui::theme::set_theme(&app.theme_name);
+            crate::app::save_settings(app);
+        }
+        "settings" => {
+            app.settings_open = true;
+            app.settings_selected = 0;
         }
         "help" => app.show_help = true,
         _ => {}
@@ -342,6 +348,43 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
 
     if app.show_help {
         app.show_help = false;
+        app.needs_redraw = true;
+        return;
+    }
+
+    if app.settings_open {
+        let num_settings = 3usize;
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                app.settings_open = false;
+            }
+            KeyCode::Up => app.settings_selected = app.settings_selected.saturating_sub(1),
+            KeyCode::Down => {
+                app.settings_selected = (app.settings_selected + 1).min(num_settings - 1)
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => match app.settings_selected {
+                0 => {
+                    app.theme_name = if app.theme_name == "orbit" {
+                        "tokyo-night".to_string()
+                    } else {
+                        "orbit".to_string()
+                    };
+                    crate::tui::theme::set_theme(&app.theme_name);
+                    crate::app::save_settings(app);
+                }
+                1 => {
+                    app.sidebar_visible = !app.sidebar_visible;
+                    app.needs_resize = true;
+                    crate::app::save_settings(app);
+                }
+                2 => {
+                    app.agent_panel_visible = !app.agent_panel_visible;
+                    crate::app::save_settings(app);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
         app.needs_redraw = true;
         return;
     }
@@ -863,7 +906,7 @@ async fn handle_launch_modal_mouse(
 
     let inner_x = modal_x + 1;
     // Agent rows start at modal_y+3 (border + blank + "Agent:" label).
-    let agents_start = modal_y + 3;
+    let agents_start = modal_y + 4;
     let agents_end = agents_start + n;
     let btn_row = modal_y + modal_h.saturating_sub(2);
 
@@ -959,6 +1002,39 @@ async fn handle_mouse(
     writer: &IpcWriter,
     term_size: ratatui::layout::Rect,
 ) {
+    if app.settings_open {
+        return;
+    }
+
+    if let crate::app::InputMode::CommandPalette {
+        search, selected, ..
+    } = &mut app.mode
+    {
+        match mouse.kind {
+            crossterm::event::MouseEventKind::ScrollUp => {
+                *selected = selected.saturating_sub(1);
+                app.needs_redraw = true;
+            }
+            crossterm::event::MouseEventKind::ScrollDown => {
+                let s = search.to_lowercase();
+                let max = if s.is_empty() {
+                    COMMANDS.len()
+                } else {
+                    COMMANDS
+                        .iter()
+                        .filter(|c| c.label.to_lowercase().contains(&s))
+                        .count()
+                };
+                if max > 0 {
+                    *selected = (*selected + 1).min(max - 1);
+                }
+                app.needs_redraw = true;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     let ctx_info = app.context_menu.as_ref().map(|menu| {
         let menu_w: u16 = menu
             .items
@@ -1010,18 +1086,21 @@ async fn handle_mouse(
                 app.close_context_menu();
             }
             MouseEventKind::Moved => {
-                let mut new_selected = 0;
-                for (i, &is_act) in is_action.iter().enumerate() {
-                    if is_act
-                        && mouse.row == menu_y + 1 + i as u16
-                        && mouse.column >= menu_x
-                        && mouse.column < menu_x + menu_w
-                    {
-                        new_selected = i;
+                let in_menu = mouse.row >= menu_y
+                    && mouse.row < menu_y + 1 + is_action.len() as u16
+                    && mouse.column >= menu_x
+                    && mouse.column < menu_x + menu_w;
+                if in_menu {
+                    let mut new_selected =
+                        app.context_menu.as_ref().map(|m| m.selected).unwrap_or(0);
+                    for (i, &is_act) in is_action.iter().enumerate() {
+                        if is_act && mouse.row == menu_y + 1 + i as u16 {
+                            new_selected = i;
+                        }
                     }
-                }
-                if let Some(ref mut m) = app.context_menu {
-                    m.selected = new_selected;
+                    if let Some(ref mut m) = app.context_menu {
+                        m.selected = new_selected;
+                    }
                 }
                 app.needs_redraw = true;
             }
@@ -1125,8 +1204,24 @@ async fn handle_mouse(
                 }
             }
 
-            // Collapsed sidebar: clicking a space number row switches space and expands
             if !app.sidebar_visible && mouse.column < SIDEBAR_COLLAPSED_W && mouse.row > 0 {
+                let last = term_h.saturating_sub(2);
+                let btn2 = term_h.saturating_sub(3);
+                if mouse.row == last {
+                    app.mode = InputMode::CommandPalette {
+                        search: String::new(),
+                        selected: 0,
+                        search_focused: false,
+                    };
+                    app.needs_redraw = true;
+                    return;
+                }
+                if mouse.row == btn2 {
+                    let _ = writer
+                        .send(orbit_protocol::ClientMessage::CreateSpace { name: None })
+                        .await;
+                    return;
+                }
                 let space_idx = (mouse.row - 1) as usize;
                 if space_idx < app.spaces.len() {
                     app.active_space_idx = space_idx;
@@ -1134,14 +1229,13 @@ async fn handle_mouse(
                     let _ = writer
                         .send(orbit_protocol::ClientMessage::SwitchSpace { space_id })
                         .await;
+                    app.needs_redraw = true;
+                    return;
                 }
-                app.sidebar_visible = true;
-                app.needs_redraw = true;
-                return;
             }
             // Sidebar: click a space card
             if app.sidebar_visible && mouse.column < SIDEBAR_W {
-                let mut y: u16 = 2; // after header + divider
+                let mut y: u16 = 2;
                 for (i, space) in app.spaces.iter().enumerate() {
                     if mouse.row >= y && mouse.row < y + 4 {
                         let space_id = space.space_id;
@@ -1153,9 +1247,6 @@ async fn handle_mouse(
                         return;
                     }
                     y += 4;
-                    if i + 1 < app.spaces.len() {
-                        y += 1;
-                    }
                 }
                 // Bottom bar: [+] New (left half) | ≡ Command (right half)
                 if mouse.row + 1 == term_h {
@@ -1457,7 +1548,20 @@ async fn handle_mouse(
                 // Right-click inside the agent panel — no context menu for agent cards yet.
             } else if app.sidebar_visible && mouse.column < sidebar_w {
                 if mouse.row >= 2 {
-                    app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Space);
+                    let mut y: u16 = 2;
+                    let mut on_card = false;
+                    for _ in &app.spaces {
+                        if mouse.row >= y && mouse.row < y + 4 {
+                            on_card = true;
+                            break;
+                        }
+                        y += 4;
+                    }
+                    if on_card {
+                        app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Space);
+                    } else {
+                        app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Sidebar);
+                    }
                 } else {
                     app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Sidebar);
                 }
@@ -1653,12 +1757,17 @@ async fn handle_mouse(
                 app.needs_redraw = true;
             }
 
-            // Tab bar hover (row 0 of the frame, after the sidebar).
             let sb_w = if app.sidebar_visible {
                 SIDEBAR_W
             } else {
                 SIDEBAR_COLLAPSED_W
             };
+            if mouse.column >= sb_w && app.sidebar_hovered.is_some() {
+                app.sidebar_hovered = None;
+                app.needs_redraw = true;
+            }
+
+            // Tab bar hover (row 0 of the frame, after the sidebar).
             if mouse.row == 0 && mouse.column >= sb_w {
                 let col = mouse.column - sb_w;
                 let mut acc: u16 = 0;
@@ -1783,18 +1892,28 @@ async fn handle_mouse(
                         break;
                     }
                     y += 4;
-                    if i + 1 < app.spaces.len() {
-                        y += 1;
-                    }
                 }
-                // Bottom bar hover (last row of terminal)
-                if hovered.is_none() && mouse.row + 1 == term_h {
+                if hovered.is_none() && mouse.row + 2 == term_h {
                     if mouse.column < SIDEBAR_W / 2 {
                         hovered = Some(app.spaces.len());
                     } else {
                         hovered = Some(app.spaces.len() + 1);
                     }
                 }
+                if app.sidebar_hovered != hovered {
+                    app.sidebar_hovered = hovered;
+                    app.needs_redraw = true;
+                }
+            } else if !app.sidebar_visible && mouse.column < SIDEBAR_COLLAPSED_W {
+                let last = term_h.saturating_sub(2);
+                let btn2 = term_h.saturating_sub(3);
+                let hovered = if mouse.row == last {
+                    Some(app.spaces.len() + 1)
+                } else if mouse.row == btn2 {
+                    Some(app.spaces.len())
+                } else {
+                    None
+                };
                 if app.sidebar_hovered != hovered {
                     app.sidebar_hovered = hovered;
                     app.needs_redraw = true;
