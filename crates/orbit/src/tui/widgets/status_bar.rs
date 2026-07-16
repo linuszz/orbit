@@ -11,10 +11,7 @@ use crate::tui::theme::*;
 use crate::tui::widgets::agent_monitor::{blocked_pulse_color, working_pulse_color};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let bg = Block::default()
-        .style(Style::default().bg(bg_secondary()).fg(fg_muted()))
-        .borders(ratatui::widgets::Borders::TOP)
-        .border_style(Style::default().fg(border()));
+    let bg = Block::default().style(Style::default().bg(bg_secondary()).fg(fg_muted()));
     frame.render_widget(bg, area);
 
     let mut spans: Vec<Span> = vec![];

@@ -6,9 +6,15 @@ use crate::app::App;
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::Paragraph;
+    use ratatui::widgets::{Block, Clear, Paragraph};
 
     use crate::tui::theme::*;
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(bg_primary())),
+        area,
+    );
 
     let fleet_badge: String = if !app.agent_panel_visible && !app.agents.is_empty() {
         let n_blocked = app

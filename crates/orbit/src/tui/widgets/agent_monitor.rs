@@ -152,7 +152,7 @@ fn format_duration(secs: u32) -> String {
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
-        .style(Style::default().bg(bg_secondary()))
+        .style(Style::default().bg(bg_primary()))
         .borders(Borders::LEFT)
         .border_style(Style::default().fg(border()));
     frame.render_widget(block, area);

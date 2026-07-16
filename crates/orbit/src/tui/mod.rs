@@ -11,8 +11,8 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::Span,
-    widgets::{Block, Borders},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 use std::io::{self, Stdout};
@@ -51,7 +51,7 @@ pub fn term_color(c: &TermColor) -> Color {
 }
 
 pub const SIDEBAR_W: u16 = 24;
-pub const SIDEBAR_COLLAPSED_W: u16 = 2;
+pub const SIDEBAR_COLLAPSED_W: u16 = 5;
 
 /// §6.7 responsive agent panel width:
 ///   Ultra ≥140 → 25 cols, Wide/Standard 80-139 → 22 cols, Compact <80 → 0.
@@ -86,7 +86,29 @@ pub fn render(frame: &mut Frame, app: &App) {
     ])
     .split(area);
 
-    widgets::spaces_sidebar::render(frame, cols[0], app);
+    let sidebar_area = Rect {
+        x: cols[0].x,
+        y: cols[0].y,
+        width: cols[0].width,
+        height: cols[0].height.saturating_sub(1),
+    };
+    widgets::spaces_sidebar::render(frame, sidebar_area, app);
+
+    let border_y = area.y + area.height - 1;
+    let sep = "\u{2500}";
+    let sep_style = Style::default().fg(border());
+    if cols[0].width > 0 {
+        let line: String = sep.repeat(cols[0].width as usize);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(line, sep_style))),
+            Rect {
+                x: cols[0].x,
+                y: border_y,
+                width: cols[0].width,
+                height: 1,
+            },
+        );
+    }
 
     let right = Rect {
         x: cols[1].x,
@@ -98,16 +120,72 @@ pub fn render(frame: &mut Frame, app: &App) {
     let rows = ratatui::layout::Layout::vertical([
         ratatui::layout::Constraint::Length(1),
         ratatui::layout::Constraint::Fill(1),
-        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(2),
     ])
     .split(right);
 
     widgets::tab_bar::render(frame, rows[0], app);
+    frame.render_widget(Clear, rows[1]);
     render_pane_tree(frame, rows[1], app.pane_tree(), app);
-    widgets::status_bar::render(frame, rows[2], app);
+    let status_inner = Rect {
+        x: rows[2].x,
+        y: rows[2].y,
+        width: rows[2].width,
+        height: 1,
+    };
+    let border_y = rows[2].y + 1;
+    widgets::status_bar::render(frame, status_inner, app);
 
     if app.agent_panel_visible {
-        widgets::agent_monitor::render(frame, cols[2], app);
+        let agent_area = Rect {
+            x: cols[2].x,
+            y: cols[2].y,
+            width: cols[2].width,
+            height: cols[2].height.saturating_sub(1),
+        };
+        widgets::agent_monitor::render(frame, agent_area, app);
+    }
+
+    let sep = "\u{2500}";
+    let sep_style = Style::default().fg(border()).bg(bg_primary());
+    if cols[0].width > 0 {
+        let rect = Rect {
+            x: cols[0].x,
+            y: border_y,
+            width: cols[0].width,
+            height: 1,
+        };
+        let line: String = sep.repeat(rect.width as usize);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(line, sep_style))),
+            rect,
+        );
+    }
+    if cols[1].width > 0 {
+        let rect = Rect {
+            x: cols[1].x,
+            y: border_y,
+            width: cols[1].width,
+            height: 1,
+        };
+        let line: String = sep.repeat(rect.width as usize);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(line, sep_style))),
+            rect,
+        );
+    }
+    if cols[2].width > 0 {
+        let rect = Rect {
+            x: cols[2].x,
+            y: border_y,
+            width: cols[2].width,
+            height: 1,
+        };
+        let line: String = sep.repeat(rect.width as usize);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(line, sep_style))),
+            rect,
+        );
     }
 
     if app.show_help {
@@ -128,6 +206,10 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     if app.eclipse_modal.is_some() {
         widgets::eclipse_modal::render(frame, area, app);
+    }
+
+    if app.settings_open {
+        widgets::settings_modal::render(frame, area, app);
     }
 }
 
