@@ -22,6 +22,30 @@ fn filter_indices(search: &str) -> Vec<usize> {
         .collect()
 }
 
+struct RowMap {
+    total_rows: usize,
+    item_rows: Vec<usize>,
+}
+
+fn build_row_map(filtered: &[usize], search: &str) -> RowMap {
+    let mut item_rows = Vec::with_capacity(filtered.len());
+    let mut row = 0usize;
+    let mut last_group = "";
+    for &cmd_idx in filtered {
+        let cmd = &COMMANDS[cmd_idx];
+        if cmd.group != last_group && search.is_empty() {
+            row += 1;
+            last_group = cmd.group;
+        }
+        item_rows.push(row);
+        row += 1;
+    }
+    RowMap {
+        total_rows: row,
+        item_rows,
+    }
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if let InputMode::CommandPalette {
         search,
@@ -40,7 +64,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             height: palette_h,
         };
 
-        // Dim only the non-sidebar area so the active space card remains readable
         let sb_w = if app.sidebar_visible {
             crate::tui::SIDEBAR_W
         } else {
@@ -52,7 +75,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             width: area.width.saturating_sub(sb_w),
             height: area.height,
         };
-        let dim = Block::default().style(Style::default().bg(Color::Rgb(10, 10, 14)));
+        let dim =
+            Block::default().style(Style::default().bg(ratatui::style::Color::Rgb(10, 10, 14)));
         frame.render_widget(dim, dim_area);
 
         frame.render_widget(Clear, palette_area);
@@ -75,7 +99,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled("/ to search", Style::default().fg(fg_muted())),
                 Span::raw("  "),
                 Span::styled(
-                    "up/down navigate  Enter select  Esc close",
+                    "up/down navigate  Enter select  Esc close  , settings",
                     Style::default().fg(fg_muted()),
                 ),
             ])
@@ -118,41 +142,43 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let filtered = filter_indices(search);
         let list_y = inner.y + 2;
         let list_h = inner.height.saturating_sub(3) as usize;
-        let total = filtered.len();
 
-        let scroll = if total <= list_h {
+        let row_map = build_row_map(&filtered, search);
+        let selected_row = row_map.item_rows.get(*selected).copied().unwrap_or(0);
+
+        let scroll = if row_map.total_rows <= list_h {
             0
         } else {
             let half = list_h / 2;
-            if *selected < half {
+            if selected_row < half {
                 0
-            } else if *selected >= total.saturating_sub(list_h - half) {
-                total.saturating_sub(list_h)
+            } else if selected_row >= row_map.total_rows.saturating_sub(list_h - half) {
+                row_map.total_rows.saturating_sub(list_h)
             } else {
-                *selected - half
+                selected_row - half
             }
         };
 
         let mut current_y = list_y;
-        let mut render_idx = 0;
         let mut last_group = "";
+        let mut rendered_rows = 0usize;
 
         for (vis_idx, &cmd_idx) in filtered.iter().enumerate() {
-            if vis_idx < scroll {
+            let item_row = row_map.item_rows[vis_idx];
+            if item_row < scroll {
                 if search.is_empty() {
-                    let cmd = &COMMANDS[cmd_idx];
-                    last_group = cmd.group;
+                    last_group = COMMANDS[cmd_idx].group;
                 }
                 continue;
             }
-            if render_idx >= list_h {
+            if rendered_rows >= list_h {
                 break;
             }
 
             let cmd = &COMMANDS[cmd_idx];
 
             if cmd.group != last_group && search.is_empty() {
-                if current_y < list_y + list_h as u16 {
+                if rendered_rows < list_h {
                     let group_line = Line::from(vec![Span::styled(
                         cmd.group.to_uppercase(),
                         Style::default().fg(fg_muted()).add_modifier(Modifier::BOLD),
@@ -167,12 +193,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                         },
                     );
                     current_y += 1;
-                    render_idx += 1;
+                    rendered_rows += 1;
                 }
                 last_group = cmd.group;
             }
 
-            if current_y >= list_y + list_h as u16 {
+            if rendered_rows >= list_h {
                 break;
             }
 
@@ -187,7 +213,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             } else {
                 fg_secondary()
             };
-            let border = if is_selected {
+            let marker_color = if is_selected {
                 accent()
             } else {
                 bg_secondary()
@@ -196,7 +222,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let mut spans = vec![
                 Span::styled(
                     if is_selected { ">" } else { " " },
-                    Style::default().fg(border),
+                    Style::default().fg(marker_color),
                 ),
                 Span::raw(" "),
                 Span::styled(cmd.label, Style::default().fg(fg).bg(bg)),
@@ -224,7 +250,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 },
             );
             current_y += 1;
-            render_idx += 1;
+            rendered_rows += 1;
         }
 
         if filtered.is_empty() {
@@ -243,25 +269,50 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             );
         }
 
-        let footer_y = inner.y + inner.height.saturating_sub(1);
-        let footer = Line::from(vec![
-            Span::styled("Esc ", Style::default().fg(accent())),
-            Span::styled("close  ", Style::default().fg(fg_muted())),
-            Span::styled("up/down ", Style::default().fg(accent())),
-            Span::styled("navigate  ", Style::default().fg(fg_muted())),
-            Span::styled("Enter ", Style::default().fg(accent())),
-            Span::styled("select", Style::default().fg(fg_muted())),
-        ]);
-        frame.render_widget(
-            footer,
-            Rect {
-                x: inner.x,
-                y: footer_y,
-                width: inner.width,
-                height: 1,
-            },
-        );
+        if row_map.total_rows > list_h {
+            let scroll_pct = if row_map.total_rows > 0 {
+                ((scroll as f64 / row_map.total_rows as f64) * 100.0) as u16
+            } else {
+                0
+            };
+            let indicator = format!(" {}% ", scroll_pct);
+            let footer_y = inner.y + inner.height.saturating_sub(1);
+            frame.render_widget(
+                Line::from(vec![
+                    Span::styled("Esc ", Style::default().fg(accent())),
+                    Span::styled("close  ", Style::default().fg(fg_muted())),
+                    Span::styled("\u{2191}\u{2193} ", Style::default().fg(accent())),
+                    Span::styled("navigate  ", Style::default().fg(fg_muted())),
+                    Span::styled(", ", Style::default().fg(accent())),
+                    Span::styled("settings", Style::default().fg(fg_muted())),
+                    Span::raw(" ".repeat(inner.width.saturating_sub(36) as usize)),
+                    Span::styled(indicator, Style::default().fg(fg_muted())),
+                ]),
+                Rect {
+                    x: inner.x,
+                    y: footer_y,
+                    width: inner.width,
+                    height: 1,
+                },
+            );
+        } else {
+            let footer_y = inner.y + inner.height.saturating_sub(1);
+            frame.render_widget(
+                Line::from(vec![
+                    Span::styled("Esc ", Style::default().fg(accent())),
+                    Span::styled("close  ", Style::default().fg(fg_muted())),
+                    Span::styled("\u{2191}\u{2193} ", Style::default().fg(accent())),
+                    Span::styled("navigate  ", Style::default().fg(fg_muted())),
+                    Span::styled(", ", Style::default().fg(accent())),
+                    Span::styled("settings", Style::default().fg(fg_muted())),
+                ]),
+                Rect {
+                    x: inner.x,
+                    y: footer_y,
+                    width: inner.width,
+                    height: 1,
+                },
+            );
+        }
     }
 }
-
-use ratatui::style::Color;
