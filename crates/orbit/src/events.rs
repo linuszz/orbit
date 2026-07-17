@@ -865,6 +865,23 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                         let term_rect = ratatui::layout::Rect::new(0, 0, term_size.width, term_size.height);
                         handle_mouse(mouse, app, &writer, term_rect).await;
                     }
+                    Some(Ok(Event::Paste(text))) => {
+                        // Bracketed paste: wrap in ESC[200~ / ESC[201~ so the PTY app
+                        // receives it as a paste rather than simulated keystrokes.
+                        if matches!(app.mode, InputMode::Normal) {
+                            let mut data = Vec::with_capacity(text.len() + 12);
+                            data.extend_from_slice(b"\x1b[200~");
+                            data.extend_from_slice(text.as_bytes());
+                            data.extend_from_slice(b"\x1b[201~");
+                            let _ = writer
+                                .send(ClientMessage::PaneInput {
+                                    tab_id: app.active_tab_id,
+                                    pane_id: app.active_pane,
+                                    data,
+                                })
+                                .await;
+                        }
+                    }
                     Some(Err(e)) => debug!("event stream error: {e}"),
                     None => {
                         eprintln!("Exiting: event stream closed");

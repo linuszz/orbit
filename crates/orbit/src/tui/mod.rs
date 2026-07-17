@@ -2,7 +2,7 @@ pub mod theme;
 pub mod widgets;
 
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -28,7 +28,12 @@ pub type OrbitTerminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 pub fn setup_terminal() -> io::Result<OrbitTerminal> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
     ratatui::Terminal::new(CrosstermBackend::new(stdout))
 }
 
@@ -37,7 +42,8 @@ pub fn restore_terminal(terminal: &mut OrbitTerminal) -> io::Result<()> {
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableMouseCapture
+        DisableMouseCapture,
+        DisableBracketedPaste
     )?;
     Ok(())
 }
@@ -568,7 +574,10 @@ fn render_cells(
                     }
                 });
                 if in_selection {
-                    std::mem::swap(&mut fg, &mut bg);
+                    // Use a fixed highlight rather than swapping: swapping Default colors
+                    // produces invisible or random-colored cells depending on the terminal.
+                    bg = theme::accent();
+                    fg = theme::bg_primary();
                 }
                 let mut style = Style::default().fg(fg).bg(bg);
                 let mut mods = Modifier::empty();

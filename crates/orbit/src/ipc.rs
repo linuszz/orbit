@@ -91,7 +91,7 @@ impl IpcClient {
 
     pub fn into_split(self) -> (IpcWriter, IpcReader) {
         let (recv, send) = self.stream.split();
-        let (tx, rx) = mpsc::channel::<ClientMessage>(64);
+        let (tx, rx) = mpsc::channel::<ClientMessage>(1024);
 
         let send_half = send;
         tokio::spawn(async move {
@@ -100,7 +100,8 @@ impl IpcClient {
             while let Some(msg) = rx.recv().await {
                 let bytes = match orbit_protocol::encode_message(&msg) {
                     Ok(b) => b,
-                    Err(_) => break,
+                    // Skip oversized messages rather than killing the writer.
+                    Err(_) => continue,
                 };
                 if send.write_all(&bytes).await.is_err() {
                     break;
