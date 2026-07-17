@@ -8,10 +8,6 @@ repository.workspace = true
 authors.workspace = true
 description = "Orbit daemon — session, PTY, and agent runtime server."
 
-[[bin]]
-name = "orbitd"
-path = "src/main.rs"
-
 [lib]
 name = "orbitd"
 path = "src/lib.rs"
