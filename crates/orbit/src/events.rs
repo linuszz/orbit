@@ -302,7 +302,27 @@ async fn execute_context_action(
                 app.selection = None;
             }
         }
-        "maximize" | "move_up" | "move_down" | "rename_space" => {}
+        "maximize" | "rename_space" => {}
+        "move_up" | "move_down" => {
+            if let ContextMenuTarget::Space(space_id) = target {
+                if let Some(idx) = app.spaces.iter().position(|s| s.space_id == *space_id) {
+                    let to_index = if id == "move_up" {
+                        idx.saturating_sub(1)
+                    } else {
+                        (idx + 1).min(app.spaces.len().saturating_sub(1))
+                    };
+                    if to_index != idx {
+                        app.spaces.swap(idx, to_index);
+                        let _ = writer
+                            .send(ClientMessage::ReorderSpace {
+                                space_id: *space_id,
+                                to_index,
+                            })
+                            .await;
+                    }
+                }
+            }
+        }
         "close_space" => {
             if let ContextMenuTarget::Space(space_id) = target {
                 let _ = writer

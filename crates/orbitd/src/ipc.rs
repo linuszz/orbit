@@ -153,6 +153,9 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
                             tracing::warn!("close_space: {e:#}");
                         }
                     }
+                    ClientMessage::ReorderSpace { space_id, to_index } => {
+                        space_manager.reorder_space(space_id, to_index).await;
+                    }
                     ClientMessage::AgentAbort { agent_id } => {
                         space_manager.agent_registry.abort_agent(agent_id).await;
                     }

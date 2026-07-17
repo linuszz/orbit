@@ -883,6 +883,17 @@ impl App {
                     eprintln!("Exiting: SpaceUpdated with empty tabs");
                     self.should_quit = true;
                 }
+
+                // Update space-level name/path shown in the sidebar card and status bar.
+                self.space_name = info.name.clone();
+                self.space_path = info.path.clone();
+                // Also update the matching SpaceEntry in the sidebar list.
+                if let Some(entry) = self.spaces.iter_mut().find(|s| s.space_id == info.id) {
+                    entry.cwd = info.path.clone();
+                    entry.tab_count = info.tabs.len();
+                    entry.pane_count = info.panes.len();
+                }
+
                 self.needs_redraw = true;
                 self.needs_resize = true;
             }

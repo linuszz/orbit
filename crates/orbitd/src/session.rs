@@ -2,6 +2,36 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+/// Read the current working directory of a process from the OS.
+/// Falls back to `fallback` if the pid is unknown or the OS call fails.
+fn proc_cwd(pid: u32, fallback: &str) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        let path = format!("/proc/{}/cwd", pid);
+        if let Ok(p) = std::fs::read_link(&path) {
+            if let Some(s) = p.to_str() {
+                return s.to_string();
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // proc_pidinfo with PROC_PIDVNODEPATHINFO is the right call but requires
+        // a C binding. Use `lsof` as a portable fallback for now.
+        let out = std::process::Command::new("lsof")
+            .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+            .output();
+        if let Ok(o) = out {
+            for line in String::from_utf8_lossy(&o.stdout).lines() {
+                if let Some(p) = line.strip_prefix('n') {
+                    return p.to_string();
+                }
+            }
+        }
+    }
+    fallback.to_string()
+}
+
 use anyhow::Context;
 use orbit_protocol::{
     CellGrid, FullState, PaneId, PaneInfo, PaneLayout, ServerEvent, SpaceId, SpaceInfo, SplitDir,
@@ -554,17 +584,30 @@ impl SessionState {
             }
         }
 
+        // Determine the active pane for the active tab so we can read its live cwd.
+        let active_pane_id = tabs.get(&active_tab).map(|t| t.active_pane).or_else(|| {
+            all_pane_ids
+                .first()
+                .and_then(|(_, leaves)| leaves.first().copied())
+        });
+
         let mut pane_infos: Vec<PaneInfo> = Vec::new();
         for (tab_id, leaves) in &all_pane_ids {
             for &pid in leaves {
                 if let Some(entry) = panes.get(&pid) {
+                    // Read live cwd from the child process; fall back to session cwd.
+                    let child_pid = entry.child.lock().ok().and_then(|c| c.process_id());
+                    let pane_cwd = child_pid
+                        .map(|p| proc_cwd(p, &self.cwd))
+                        .unwrap_or_else(|| self.cwd.clone());
+
                     let g = entry.vt_parser.lock().unwrap();
                     let grid = &g.grid;
                     pane_infos.push(PaneInfo {
                         id: pid,
                         tab_id: *tab_id,
                         title: "shell".to_string(),
-                        cwd: self.cwd.clone(),
+                        cwd: pane_cwd,
                         cell_grid: CellGrid {
                             cols: grid.cols,
                             rows: grid.rows,
@@ -580,10 +623,17 @@ impl SessionState {
             }
         }
 
+        // Space-level path = live cwd of the active pane (shown in sidebar card + status bar).
+        let space_path = active_pane_id
+            .and_then(|pid| panes.get(&pid))
+            .and_then(|entry| entry.child.lock().ok().and_then(|c| c.process_id()))
+            .map(|p| proc_cwd(p, &self.cwd))
+            .unwrap_or_else(|| self.cwd.clone());
+
         SpaceInfo {
             id: self.space_id,
             name: self.space_name.clone(),
-            path: self.cwd.clone(),
+            path: space_path,
             tabs: tab_infos,
             active_tab,
             panes: pane_infos,
@@ -753,6 +803,15 @@ impl SpaceManager {
         }
         let _ = self.event_bus.send(ServerEvent::SpaceClosed(space_id));
         Ok(())
+    }
+
+    pub async fn reorder_space(&self, space_id: SpaceId, to_index: usize) {
+        let mut order = self.space_order.write().await;
+        if let Some(from) = order.iter().position(|&id| id == space_id) {
+            order.remove(from);
+            let clamped = to_index.min(order.len());
+            order.insert(clamped, space_id);
+        }
     }
 
     pub async fn switch_space(&self, space_id: SpaceId) -> anyhow::Result<()> {

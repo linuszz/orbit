@@ -33,6 +33,10 @@ pub enum ClientMessage {
     CloseSpace {
         space_id: crate::SpaceId,
     },
+    ReorderSpace {
+        space_id: crate::SpaceId,
+        to_index: usize,
+    },
 
     SplitPane {
         tab_id: crate::TabId,
