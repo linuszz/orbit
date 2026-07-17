@@ -838,6 +838,28 @@ impl SpaceManager {
         }
     }
 
+    /// Background task: every `interval_ms` milliseconds, re-read the active pane's
+    /// cwd for every space and broadcast SpaceUpdated if it changed.
+    pub async fn poll_cwd_changes(&self, interval_ms: u64) {
+        let mut last_cwds: HashMap<SpaceId, String> = HashMap::new();
+        let dur = std::time::Duration::from_millis(interval_ms);
+        loop {
+            tokio::time::sleep(dur).await;
+            let order = self.space_order.read().await;
+            let spaces = self.spaces.read().await;
+            for &sid in order.iter() {
+                if let Some(session) = spaces.get(&sid) {
+                    let info = session.collect_space_info().await;
+                    let prev = last_cwds.get(&sid).map(|s| s.as_str()).unwrap_or("");
+                    if info.path != prev {
+                        last_cwds.insert(sid, info.path.clone());
+                        let _ = self.event_bus.send(ServerEvent::SpaceUpdated(info));
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn collect_full_state(&self) -> FullState {
         let active = *self.active_space.read().await;
         let spaces = self.spaces.read().await;

@@ -93,6 +93,13 @@ async fn main() -> Result<()> {
     let space_manager = Arc::new(SpaceManager::new(event_bus, shell, cwd, 80, 24).await?);
     info!("orbitd ready — 1 space, 1 pane");
 
+    // Poll cwd changes every 500 ms so the sidebar and status bar update when
+    // the user runs `cd` in a pane, without needing an explicit space switch.
+    {
+        let sm = space_manager.clone();
+        tokio::spawn(async move { sm.poll_cwd_changes(500).await });
+    }
+
     tokio::select! {
         res = accept_loop(listener, space_manager.clone()) => {
             if let Err(e) = res { error!("accept loop error: {e:#}"); }
