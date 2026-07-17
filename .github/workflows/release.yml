@@ -78,3 +78,19 @@ jobs:
         with:
           files: artifacts/**/*.tar.gz
           generate_release_notes: true
+
+      - name: Trigger Homebrew tap update
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          repository: linuszz/homebrew-orbit
+          event-type: new-release
+          client-payload: '{"version": "${{ github.ref_name }}"}'
+
+      - name: Trigger apt repository update
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          repository: linuszz/apt-orbit
+          event-type: new-release
+          client-payload: '{"version": "${{ github.ref_name }}"}'
