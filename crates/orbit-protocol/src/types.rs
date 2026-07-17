@@ -56,6 +56,7 @@ impl CellFlags {
     pub const ITALIC: u8 = 0b0010;
     pub const UNDERLINE: u8 = 0b0100;
     pub const DIM: u8 = 0b1000;
+    pub const REVERSE: u8 = 0b0001_0000;
 
     pub fn bold(self) -> bool {
         self.0 & Self::BOLD != 0
@@ -68,6 +69,9 @@ impl CellFlags {
     }
     pub fn dim(self) -> bool {
         self.0 & Self::DIM != 0
+    }
+    pub fn reverse(self) -> bool {
+        self.0 & Self::REVERSE != 0
     }
 }
 
@@ -88,6 +92,10 @@ pub struct Cell {
     pub flags: CellFlags,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellGrid {
     pub cols: u16,
@@ -95,6 +103,12 @@ pub struct CellGrid {
     pub cells: Vec<Cell>,
     pub cursor_x: u16,
     pub cursor_y: u16,
+    #[serde(default = "default_true")]
+    pub cursor_visible: bool,
+    #[serde(default)]
+    pub mouse_reporting: bool,
+    #[serde(default)]
+    pub mouse_sgr: bool,
 }
 
 impl CellGrid {
@@ -105,6 +119,9 @@ impl CellGrid {
             cells: vec![Cell::default(); cols as usize * rows as usize],
             cursor_x: 0,
             cursor_y: 0,
+            cursor_visible: true,
+            mouse_reporting: false,
+            mouse_sgr: false,
         }
     }
 }

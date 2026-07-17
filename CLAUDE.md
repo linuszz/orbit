@@ -104,14 +104,30 @@ orbit/                              # this repo — implementation only
 ├── .github/workflows/ci.yml        # fmt + clippy + test + build (Linux+macOS)
 ├── crates/
 │   ├── orbit/                      # BIN: TUI client (Ground Station)
-│   │   └── src/{main,app,events,ipc,tui}.rs
+│   │   └── src/
+│   │       ├── {main,app,events,ipc}.rs
+│   │       └── tui/
+│   │           ├── mod.rs          # layout, render, terminal setup
+│   │           ├── theme.rs        # ThemeColors struct (Orbit + Tokyo Night palettes)
+│   │           └── widgets/        # UI component modules
+│   │               ├── agent_monitor.rs   # Agent Fleet Panel (cards, scroll, keyboard)
+│   │               ├── command_palette.rs # Flight Deck (searchable, grouped, scrollable)
+│   │               ├── context_menu.rs    # Right-click context menus
+│   │               ├── eclipse_modal.rs   # Satellite Eclipse intervention modal
+│   │               ├── launch_modal.rs    # New space launch dialog
+│   │               ├── settings_modal.rs  # Settings overlay (theme, sidebar, panel)
+│   │               ├── spaces_sidebar.rs  # Left sidebar (space cards, stats)
+│   │               ├── status_bar.rs      # Bottom status bar (mode, agent pulse)
+│   │               └── tab_bar.rs         # Top tab bar (overflow, drag reorder)
 │   ├── orbitd/                     # BIN: daemon (Core)
 │   │   └── src/{main,session,pty,agent,io,ipc}.rs
 │   ├── orbit-protocol/             # LIB: shared wire types (IPC contract)
 │   │   └── src/{lib,messages,types,encoding,error}.rs
 │   └── orbit-core/                 # LIB: domain model + VT emulation (no tokio)
 │       └── src/{lib,config,error,vt/}.rs
-└── claude.md                       # this file
+├── LICENSE                         # AGPL-3.0-only
+├── CLA.md                          # Contributor License Agreement
+└── CLAUDE.md                       # this file
 
 02_design/                          # sibling — design specs (READ-ONLY reference)
 ├── ARCHITECTURE.md                 # high-level system architecture
@@ -155,6 +171,7 @@ With `just` installed: `just dev` (run client), `just daemon` (run daemon),
 
 - **Rust**: stable channel (pinned via `rust-toolchain.toml`), MSRV 1.75
 - **Edition**: 2021
+- **License**: AGPL-3.0-only
 - **Targets**: Linux + macOS first-class; Windows is a future compatibility target
 - **System deps**: pkg-config, libssl-dev (Linux)
 
@@ -199,7 +216,7 @@ orbit (client / Ground Station)        orbitd (daemon / Core)
 | `orbit-protocol` | lib | No | `ClientMessage`, `ServerEvent`, `Capabilities`, `Cell`, `CellGrid`, `TermColor`, ID newtypes, `ProtocolError` |
 | `orbit-core` | lib | **No** (pure sync) | `Config`, `VtParser`, `CellGrid` ops, `VtError`/`GridError` |
 | `orbitd` | bin | Yes | session/pty/agent/io/ipc modules |
-| `orbit` | bin | Yes | app state, tui (render/layout/theme/animation), events (keyboard/mouse), ipc client |
+| `orbit` | bin | Yes | app state, tui (render/layout/theme/widgets), events (keyboard/mouse/drag), ipc client, settings persistence |
 
 `orbit-protocol` and `orbit-core` MUST remain tokio-free so they can be unit
 tested in isolation.
@@ -270,7 +287,9 @@ do NOT regress to blue/other palettes from older design docs.
 | `ACCENT_ERROR` | `oklch(65% 0.20 25)` | `#c8321e` | red — Error |
 | `BORDER` | `oklch(35% 0.008 250)` | `#3c3c4c` | borders |
 
-RGB constants in `crates/orbit/src/tui/theme.rs` (when implemented).
+RGB constants live in `crates/orbit/src/tui/theme.rs` as `ThemeColors::orbit()`.
+The theme system supports runtime switching via `set_theme("orbit"|"tokyo-night")`
+with thread-local accessor functions (`bg_primary()`, `accent()`, etc.).
 
 ### 6.3 Button states (three only)
 
@@ -311,7 +330,7 @@ bug.
 ├──────────┴──────────────────────────────┴───────────────┤
 │  Status Bar (横跨全宽)                                   │
 └─────────────────────────────────────────────────────────┘
-        [Floating Layer: Flight Deck / Context Menu / Eclipse Modal]
+        [Floating Layer: Flight Deck / Context Menu / Eclipse Modal / Settings / Launch]
 ```
 
 Layout invariants:
@@ -351,42 +370,63 @@ is intercepted; everything else passes through to the PTY in Normal mode.
 | Mode | Entry | Behavior |
 |---|---|---|
 | `Normal` | default | All keys passthrough to PTY; only prefix is intercepted |
-| `Prefix` (COMMAND) | press prefix | Transient — waits for one command key, then returns to Normal |
+| `CommandPalette { search, selected, search_focused }` | press prefix (expanded mode) | Searchable command list; Enter executes, Esc cancels |
 | `Scroll { offset }` | prefix + `[` | Arrow keys scroll scrollback; no PTY forwarding |
-| `Copy { cursor, selection }` | prefix + `[` again | Vim-like visual selection; `y` yanks via OSC 52 |
+| `AgentPanel { selected }` | prefix + `a` | Keyboard navigation of Agent Fleet panel (j/k/n/r/s/d) |
 
-`InterventionModal` is NOT an `InputMode` — it lives in the `Overlay` enum
-and is handled on a separate priority path.
+Note: `Prefix` mode from the design docs is now subsumed by
+`CommandPalette` in expanded mode (the default). In minimal mode, the
+prefix key opens the status-bar hint then processes one key — but the code
+routes through `CommandPalette` with `search_focused: false`.
 
-### 7.3 COMMAND mode key table (canonical)
+Eclipse modal, Settings modal, and Context Menu are NOT `InputMode` variants
+— they live in overlay/state fields on `App` and intercept input on a
+separate priority path before mode dispatch.
+
+### 7.3 COMMAND mode key table (implemented)
+
+These are registered in `COMMANDS` array (`app.rs`) and dispatched via the
+Command Palette. Direct shortcut keys work when the palette is open:
+
+| Key | Command ID | Action |
+|---|---|---|
+| `h` | `split_h` | Split pane horizontal |
+| `v` | `split_v` | Split pane vertical |
+| `x` | `close_pane` | Close active pane |
+| `[` | `scroll_mode` | Enter scroll mode |
+| `c` | `new_tab` | New tab |
+| `n` / `p` | `next_tab` / `prev_tab` | Next / Previous tab |
+| `b` | `toggle_sidebar` | Toggle spaces sidebar |
+| `a` | `toggle_agent` | Toggle Agent Fleet panel (enters AgentPanel mode) |
+| `d` | `detach` | Detach session (Go Dark) |
+| `T` | `toggle_theme` | Cycle theme (Orbit / Tokyo Night) |
+| `,` | `settings` | Open Settings modal |
+| `?` | `help` | Show help overlay |
+| `k` / `j` | `agent_scroll_up/down` | Scroll Agent Fleet panel |
+| `Esc` | — | Cancel / close palette |
+
+**AgentPanel mode keys** (when in `InputMode::AgentPanel`):
 
 | Key | Action |
 |---|---|
-| `h` | `SplitPaneHorizontal` |
-| `v` | `SplitPaneVertical` |
-| `c` | `NewTab` |
-| `n` / `p` | `NextTab` / `PrevTab` |
-| `1`–`9` | `SwitchSpace(idx)` |
-| `[` | `EnterScrollMode` |
-| `z` | `ZoomPane` |
-| `x` | `ClosePane` |
-| `d` | `DetachSession` (Go Dark) |
-| `a` | `ToggleAgentPanel` |
-| `b` | `ToggleSidebar` |
-| `m` | `ToggleFlightDeckMode` (persisted) |
-| `?` | `ShowHelpOverlay` |
-| `Esc` / prefix again | `CancelPrefix` |
+| `j` / `k` | Navigate agent cards |
+| `n` | Cycle to next agent |
+| `r` | Restart errored agent |
+| `s` | Stop agent |
+| `d` | Dismiss completed agent |
+| `Esc` / `q` | Exit AgentPanel mode |
 
 Full key tables (including Scroll / Copy modes) live in
 `02_design/06_tech-design/06-input-routing-and-modes.md` §5. That document
-is the single source of truth and supersedes any conflicting key binding in
-older docs (which used incompatible direct shortcuts like `Ctrl+Shift+S`).
+is the design source of truth; the `COMMANDS` array in code is the
+implementation source of truth.
 
-### 7.4 Flight Deck modes
+### 7.4 Flight Deck (Command Palette)
 
-`flight_deck_mode` config (`expanded` default | `minimal`):
-- **expanded**: prefix press pops up a searchable 60×14 command list
-- **minimal**: prefix press only shows a status-bar `[COMMAND m:expand Esc:cancel]`
+Currently always in expanded mode. Prefix key opens the searchable command
+list with grouped commands (Pane, Tab, View, Session, Satellite, Help).
+Features: type-to-filter, scroll with group header accounting, mouse wheel,
+click to execute, shortcut key display.
 
 ---
 
@@ -623,7 +663,7 @@ Scope write guards as tightly as possible, especially before calling
 | `ORBIT_INSTRUMENTS` | Comma-separated MCP server names to enable (Phase 4) |
 | `ORBIT_PANE_ID` | **Set by orbitd on every PTY child** — agent detection reads this |
 
-### 10.3 `config.toml` shape
+### 10.3 `config.toml` shape (planned full config)
 
 ```toml
 [general]
@@ -657,6 +697,18 @@ tunnel_compression = true
 **Format: TOML only.** (Older design docs reference YAML — that's been
 superseded; see `v2-technical-review.md` C6.)
 
+### 10.4 `settings.toml` (user preferences, persisted by client)
+
+Located at `$XDG_CONFIG_HOME/orbit/settings.toml` (or `~/.config/orbit/settings.toml`).
+Managed by `app::load_settings()` / `app::save_settings()`. Contains
+UI-level preferences that the client controls independently of the daemon:
+
+```toml
+theme = "orbit"                   # "orbit" | "tokyo-night"
+sidebar_visible = true
+agent_panel_visible = false
+```
+
 ---
 
 ## 11. Accepted tradeoffs (known costs)
@@ -687,31 +739,68 @@ re-opening the design.
 
 ---
 
-## 12. Open engineering items (v5 pre-implementation checklist)
+## 12. Implementation status
 
-These are the 7 gaps identified by the final pre-implementation review
-(`02_design/06_tech-design/critics/v5-pre-implementation-checklist-20260705-0103.md`).
-Address them in Phase 1 week 1; do NOT let them drift.
+### 12.1 Pre-implementation gaps (all resolved)
 
 | GAP | Status | Action |
 |---|---|---|
-| **GAP 1**: workspace deps complete | ✅ Done in skeleton | All deps declared in `Cargo.toml [workspace.dependencies]` |
-| **GAP 2**: test strategy | ⚠ Open | First IPC roundtrip test added (`pane_input_roundtrip` in `orbit-protocol::encoding`). Still need: VT golden-file tests (from `vte`/`alacritty_terminal` fixtures), `proptest` for CellGrid invariants, protocol-version compat tests. |
-| **GAP 3**: daemon lifecycle | ⚠ Open | Add signal handling (SIGTERM/SIGINT → graceful PTY shutdown → unlink socket), PID/lock file at `$XDG_RUNTIME_DIR/orbit.lock`, `prctl(PR_SET_PDEATHSIG)` for PTY children. Doc 04 needs a new §8. |
-| **GAP 4**: error layering | ✅ Done in skeleton | `thiserror` in `orbit-protocol`/`orbit-core`; `anyhow` in `orbit`/`orbitd` mains. Verify on each new error site. |
-| **GAP 5**: CI scaffold | ✅ Done in skeleton | `.github/workflows/ci.yml` + `rust-toolchain.toml`. |
-| **GAP 6**: Vertical Slice 0 | ✅ Done | Phase 1 Mercury vertical slice is complete: orbitd binds socket, orbit connects via Hello/Welcome, PTY lifecycle, keyboard → PaneInput → PTY, output → VtParser → CellGrid → PaneOutput → render, close pane, and detach-reattach all work. Server-side tabs (new/switch/close) are implemented and survive client reconnect. |
-| **GAP 7**: README frame-rate wording | ✅ Done in skeleton | README and code say "按需重绘" / "redraw-on-demand". |
+| **GAP 1**: workspace deps complete | ✅ Done | All deps declared in `Cargo.toml [workspace.dependencies]` |
+| **GAP 2**: test strategy | ✅ Partial | IPC roundtrip test + `split_area` guards + `extract_progress`/`strip_ansi` unit tests. Still need: VT golden-file tests, `proptest` for CellGrid invariants. |
+| **GAP 3**: daemon lifecycle | ⚠ Open | Add signal handling (SIGTERM/SIGINT → graceful PTY shutdown → unlink socket), PID/lock file at `$XDG_RUNTIME_DIR/orbit.lock`, `prctl(PR_SET_PDEATHSIG)` for PTY children. |
+| **GAP 4**: error layering | ✅ Done | `thiserror` in `orbit-protocol`/`orbit-core`; `anyhow` in `orbit`/`orbitd` mains. |
+| **GAP 5**: CI scaffold | ✅ Done | `.github/workflows/ci.yml` + `rust-toolchain.toml`. |
+| **GAP 6**: Vertical Slice 0 | ✅ Done | Full Mercury slice operational. |
+| **GAP 7**: README frame-rate wording | ✅ Done | Redraw-on-demand documented and implemented. |
 
-### Other consistency items resolved at skeleton time
+### 12.2 Phase 1 Mercury — complete
 
-- ✅ No emoji (skeleton is clean)
-- ✅ Orange color system canonical (will be encoded as constants when theme module lands)
-- ✅ TOML config format (no YAML anywhere)
-- ✅ Prefix key default Ctrl+B (not direct shortcuts like `Ctrl+Shift+S`)
-- ✅ Code uses generic terms (Space/Pane/Agent); brand terms in CLI/UI strings only
-- ✅ `09-TUI高质量设计稿-更新版.md` is canonical over the older `09-TUI高质量设计稿.md`
-- ✅ Server-side tabs implemented: TabId/TabInfo, new/switch/close handlers, and tab state survives client detach/reconnect
+- IPC: Hello/Welcome handshake, PTY lifecycle, PaneInput/PaneOutput
+- TUI: full layout (sidebar + tab bar + pane area + status bar + agent panel)
+- Tabs: server-side TabId/TabInfo, new/switch/close, survive reconnect
+- Panes: split h/v, resize (mouse drag + IPC), close, navigation (arrows)
+- Input: prefix-key system, Normal/Prefix/Scroll modes, PTY passthrough
+- Detach/reattach: session persists, full state resync on reconnect
+
+### 12.3 Phase 2 Venus — in progress
+
+Implemented:
+- ✅ Agent detection (process-name + output-pattern heuristics in orbitd)
+- ✅ Agent state machine (Working/Blocked/Idle/Error/Done) with IPC events
+- ✅ Agent Fleet Panel (full-featured sidebar): status cards, progress bars,
+  duration tracking, scroll, keyboard navigation (j/k/n/r/s/d shortcuts)
+- ✅ Eclipse modal: blocked-agent intervention with context display
+- ✅ Eclipse banner in status bar (click opens modal)
+- ✅ Agent pulse animation in status bar (Working = slow, Blocked = fast)
+- ✅ Fleet status badge on tab bar when panel hidden
+
+Remaining:
+- Agent restart/stop IPC (wire messages exist, server handlers partial)
+- Agent output history / scrollback in panel
+
+### 12.4 TUI features (cross-phase)
+
+- ✅ Theme system: `ThemeColors` struct with Orbit (orange) and Tokyo Night palettes,
+  runtime-switchable via `set_theme()`, thread-local accessor functions
+- ✅ Settings persistence: `~/.config/orbit/settings.toml` (theme, sidebar, panel)
+- ✅ Settings modal: theme selection, toggle sidebar/agent panel visibility
+- ✅ Command Palette (Flight Deck): searchable, grouped by category, scroll with
+  group header accounting, mouse wheel support
+- ✅ Context menus: right-click on tabs, panes, sidebar items
+- ✅ Mouse interactions: pane resize drag, tab reorder drag, hover states
+- ✅ Spaces Sidebar: space cards with stats (pane count, agent fleet badge),
+  bottom separator + bg_secondary content area, click to switch
+- ✅ Tab Bar: overflow handling, drag reorder, close buttons, numbering
+- ✅ Responsive layout: all four breakpoints (Compact/Standard/Wide/Ultra)
+
+### 12.5 Consistency items
+
+- ✅ No emoji (codebase clean)
+- ✅ Orange color system canonical (encoded in `ThemeColors::orbit()`)
+- ✅ TOML config format (no YAML)
+- ✅ Prefix key default Ctrl+B
+- ✅ Code uses generic terms; brand terms in UI strings only
+- ✅ License: AGPL-3.0-only (switched from unlicensed, 2026-07-13)
 
 ---
 
@@ -750,6 +839,28 @@ Address them in Phase 1 week 1; do NOT let them drift.
   (Compact <80, Standard 80–99, Wide 100–139, Ultra ≥140)
 - For protocol changes: bump `PROTOCOL_VERSION` if breaking; add a
   `Capabilities` flag if additive
+- **Run the scenario test suite** against a fresh daemon and confirm 0 failed:
+  `cd tools && cargo run --bin scenario_test`
+
+### 13.5 Regression tests — policy
+
+Any bug the user reports becomes a scenario test in `tools/scenario_test.rs`
+(or a unit test if it's widget/logic level). The test must fail before the
+fix and pass after. This prevents re-regressions.
+
+To add a scenario:
+1. Write an `async fn scen_<name>(conn: &mut Conn) -> ScenResult` function in
+   `tools/scenario_test.rs`.
+2. Register it in `main()` with `run!("name", scen_name);` under the relevant
+   section header.
+3. Fix the underlying bug.
+4. Verify `cargo run --bin scenario_test` passes with 0 failures.
+
+Known regressions that have been covered (do not remove these tests):
+- `space_lifecycle` — CreateSpace/CloseSpace IPC round-trip (was: CloseSpace
+  handler missing; close_space context menu action was empty stub)
+- `state_invariants` — active_tab fallback was TabId(0) which could be absent
+  from the tabs map after close_tab (now uses TabId(u32::MAX) sentinel)
 
 ### 13.4 Where to look for answers
 
@@ -758,13 +869,15 @@ Address them in Phase 1 week 1; do NOT let them drift.
 | What does this widget look like? | `02_design/05_UI-UX-design/03-主工作区设计.md` or `04-Agent-Monitor设计.md` |
 | What's the wire format / message variant? | `crates/orbit-protocol/src/messages.rs` (canonical) or `02_design/06_tech-design/03-ipc-protocol.md` |
 | What escape sequences must I support? | `02_design/06_tech-design/05-vt-emulation.md` §4 |
-| What does this key do? | `02_design/06_tech-design/06-input-routing-and-modes.md` §5 (single source of truth) |
+| What does this key do? | `COMMANDS` array in `app.rs` (implemented), or `02_design/06_tech-design/06-input-routing-and-modes.md` §5 (design) |
 | What's the agent state machine? | `02_design/06_tech-design/04-server-architecture.md` §4.2 |
 | Where does scrollback data come from? | `02_design/06_tech-design/08-scrollback-and-history.md` |
 | What fields does the Agent card need? | `02_design/06_tech-design/07-agent-data-model.md` §1 |
 | What's the CLI command for X? | `02_design/BRAND_ORBIT.md` "CLI Command System" |
 | Why was decision Y made? | `02_design/06_tech-design/critics/v2-technical-review.md` and successors |
-| What's still open? | §12 above + `v5-pre-implementation-checklist-20260705-0103.md` |
+| What's still open? | §12 above |
+| What theme tokens / colors exist? | `crates/orbit/src/tui/theme.rs` (`ThemeColors` struct + accessor fns) |
+| How does settings persistence work? | `crates/orbit/src/app.rs` (`UserSettings`, `load_settings`, `save_settings`) |
 
 ---
 

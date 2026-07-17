@@ -1,4 +1,5 @@
 use orbit_protocol::{Cell, CellFlags, TermColor};
+use unicode_width::UnicodeWidthChar;
 
 pub struct CellGrid {
     pub cols: u16,
@@ -21,6 +22,7 @@ pub struct CellGrid {
     current_italic: bool,
     current_underline: bool,
     current_dim: bool,
+    current_reverse: bool,
 
     saved_cells: Option<Vec<Cell>>,
     saved_cursor_x: u16,
@@ -33,6 +35,12 @@ pub struct CellGrid {
     // DECSC / DECRC cursor save-restore (ESC 7 / ESC 8, CSI s / CSI u)
     cursor_saved_x: u16,
     cursor_saved_y: u16,
+
+    /// True when the PTY program has enabled mouse reporting (CSI ?1000h / ?1002h / ?1003h).
+    /// When set, mouse clicks inside this pane should be forwarded as escape sequences.
+    pub mouse_reporting: bool,
+    /// True when SGR mouse mode is active (CSI ?1006h) — uses SGR format for coordinates.
+    pub mouse_sgr: bool,
 }
 
 impl CellGrid {
@@ -56,6 +64,7 @@ impl CellGrid {
             current_italic: false,
             current_underline: false,
             current_dim: false,
+            current_reverse: false,
             saved_cells: None,
             saved_cursor_x: 0,
             saved_cursor_y: 0,
@@ -65,6 +74,8 @@ impl CellGrid {
             in_alternate_screen: false,
             cursor_saved_x: 0,
             cursor_saved_y: 0,
+            mouse_reporting: false,
+            mouse_sgr: false,
         }
     }
 
@@ -75,11 +86,20 @@ impl CellGrid {
     }
 
     pub fn put_char(&mut self, ch: char) {
-        if self.cursor_x >= self.cols {
+        let width = UnicodeWidthChar::width(ch).unwrap_or(0);
+
+        // Zero-width characters (combining marks, variation selectors like U+FE0F):
+        // do not advance cursor or create a new cell.
+        if width == 0 {
+            return;
+        }
+
+        // Wrap if cursor is past end of line, OR if a wide char doesn't fit.
+        if self.cursor_x >= self.cols || (width == 2 && self.cursor_x + 1 >= self.cols) {
             self.cursor_x = 0;
             self.line_feed();
         }
-        let idx = self.cell_index(self.cursor_x, self.cursor_y);
+
         let mut flags = 0u8;
         if self.current_bold {
             flags |= CellFlags::BOLD;
@@ -93,6 +113,11 @@ impl CellGrid {
         if self.current_dim {
             flags |= CellFlags::DIM;
         }
+        if self.current_reverse {
+            flags |= CellFlags::REVERSE;
+        }
+
+        let idx = self.cell_index(self.cursor_x, self.cursor_y);
         self.cells[idx] = Cell {
             ch,
             fg: self.current_fg,
@@ -100,6 +125,18 @@ impl CellGrid {
             flags: CellFlags(flags),
         };
         self.cursor_x += 1;
+
+        // Wide characters (width == 2): write a spacer cell in the next column.
+        if width == 2 {
+            let spacer_idx = self.cell_index(self.cursor_x, self.cursor_y);
+            self.cells[spacer_idx] = Cell {
+                ch: '\0', // spacer — renderer treats '\0' as ' '
+                fg: self.current_fg,
+                bg: self.current_bg,
+                flags: CellFlags(flags),
+            };
+            self.cursor_x += 1;
+        }
     }
 
     pub fn carriage_return(&mut self) {
@@ -153,29 +190,47 @@ impl CellGrid {
         self.cursor_visible = visible;
     }
 
+    fn erase_blank(&self) -> Cell {
+        // Store raw fg/bg plus the REVERSE flag so the renderer can do the swap.
+        // This preserves the color information when current_fg or current_bg is Default.
+        let mut flags = 0u8;
+        if self.current_reverse {
+            flags |= CellFlags::REVERSE;
+        }
+        Cell {
+            ch: ' ',
+            fg: self.current_fg,
+            bg: self.current_bg,
+            flags: CellFlags(flags),
+        }
+    }
+
     pub fn erase_display(&mut self, mode: u16) {
+        let blank = self.erase_blank();
         let cursor_pos = self.cell_index(self.cursor_x, self.cursor_y);
         match mode {
-            0 => self.cells[cursor_pos..].fill(Cell::default()),
-            1 => self.cells[..=cursor_pos].fill(Cell::default()),
-            2 | 3 => self.cells.fill(Cell::default()),
+            0 => self.cells[cursor_pos..].fill(blank),
+            1 => self.cells[..=cursor_pos].fill(blank),
+            2 | 3 => self.cells.fill(blank),
             _ => {}
         }
     }
 
     pub fn erase_line(&mut self, mode: u16) {
+        let blank = self.erase_blank();
         let row_start = self.cursor_y as usize * self.cols as usize;
         let cursor_col = self.cursor_x as usize;
         let cols = self.cols as usize;
         match mode {
-            0 => self.cells[row_start + cursor_col..row_start + cols].fill(Cell::default()),
-            1 => self.cells[row_start..=row_start + cursor_col].fill(Cell::default()),
-            2 => self.cells[row_start..row_start + cols].fill(Cell::default()),
+            0 => self.cells[row_start + cursor_col..row_start + cols].fill(blank),
+            1 => self.cells[row_start..=row_start + cursor_col].fill(blank),
+            2 => self.cells[row_start..row_start + cols].fill(blank),
             _ => {}
         }
     }
 
     pub fn insert_lines(&mut self, n: u16) {
+        let blank = self.erase_blank();
         let row = self.cursor_y as usize;
         let bottom = self.scroll_bottom as usize;
         let cols = self.cols as usize;
@@ -188,12 +243,13 @@ impl CellGrid {
         for r in row..row + n {
             let start = r * cols;
             if start + cols <= self.cells.len() {
-                self.cells[start..start + cols].fill(Cell::default());
+                self.cells[start..start + cols].fill(blank);
             }
         }
     }
 
     pub fn delete_lines(&mut self, n: u16) {
+        let blank = self.erase_blank();
         let row = self.cursor_y as usize;
         let bottom = self.scroll_bottom as usize;
         let cols = self.cols as usize;
@@ -206,37 +262,39 @@ impl CellGrid {
         for r in (bottom + 1).saturating_sub(n)..=bottom {
             let start = r * cols;
             if start + cols <= self.cells.len() {
-                self.cells[start..start + cols].fill(Cell::default());
+                self.cells[start..start + cols].fill(blank);
             }
         }
     }
 
     pub fn insert_chars(&mut self, n: u16) {
+        let blank = self.erase_blank();
         let row_start = self.cursor_y as usize * self.cols as usize;
         let col = self.cursor_x as usize;
         let cols = self.cols as usize;
         let n = n as usize;
         if col + n >= cols {
-            self.cells[row_start + col..row_start + cols].fill(Cell::default());
+            self.cells[row_start + col..row_start + cols].fill(blank);
             return;
         }
         self.cells
             .copy_within(row_start + col..row_start + cols - n, row_start + col + n);
-        self.cells[row_start + col..row_start + col + n].fill(Cell::default());
+        self.cells[row_start + col..row_start + col + n].fill(blank);
     }
 
     pub fn delete_chars(&mut self, n: u16) {
+        let blank = self.erase_blank();
         let row_start = self.cursor_y as usize * self.cols as usize;
         let col = self.cursor_x as usize;
         let cols = self.cols as usize;
         let n = n as usize;
         if col + n >= cols {
-            self.cells[row_start + col..row_start + cols].fill(Cell::default());
+            self.cells[row_start + col..row_start + cols].fill(blank);
             return;
         }
         self.cells
             .copy_within(row_start + col + n..row_start + cols, row_start + col);
-        self.cells[row_start + cols - n..row_start + cols].fill(Cell::default());
+        self.cells[row_start + cols - n..row_start + cols].fill(blank);
     }
 
     pub fn set_sgr(&mut self, params: &[u16]) {
@@ -256,17 +314,20 @@ impl CellGrid {
                     self.current_italic = false;
                     self.current_underline = false;
                     self.current_dim = false;
+                    self.current_reverse = false;
                 }
                 1 => self.current_bold = true,
                 2 => self.current_dim = true,
                 3 => self.current_italic = true,
                 4 => self.current_underline = true,
+                7 => self.current_reverse = true,
                 22 => {
                     self.current_bold = false;
                     self.current_dim = false;
                 }
                 23 => self.current_italic = false,
                 24 => self.current_underline = false,
+                27 => self.current_reverse = false,
                 30..=37 => self.current_fg = TermColor::Ansi(params[i] as u8 - 30),
                 38 => {
                     if params.get(i + 1) == Some(&5) && i + 2 < params.len() {
@@ -384,10 +445,11 @@ impl CellGrid {
     }
 
     pub fn erase_chars(&mut self, n: u16) {
+        let blank = self.erase_blank();
         let start = self.cell_index(self.cursor_x, self.cursor_y);
         let row_end = (self.cursor_y as usize + 1) * self.cols as usize;
         let end = (start + n as usize).min(row_end);
-        self.cells[start..end].fill(Cell::default());
+        self.cells[start..end].fill(blank);
     }
 
     pub fn set_title(&mut self, title: String) {
@@ -420,10 +482,11 @@ impl CellGrid {
             let dst = r * cols;
             self.cells.copy_within(src..src + cols, dst);
         }
+        let blank = self.erase_blank();
         for r in (bottom + 1).saturating_sub(n)..=bottom {
             let start = r * cols;
             if start + cols <= self.cells.len() {
-                self.cells[start..start + cols].fill(Cell::default());
+                self.cells[start..start + cols].fill(blank);
             }
         }
     }
@@ -433,6 +496,7 @@ impl CellGrid {
     }
 
     fn scroll_down(&mut self, n: usize) {
+        let blank = self.erase_blank();
         let top = self.scroll_top as usize;
         let bottom = self.scroll_bottom as usize;
         let cols = self.cols as usize;
@@ -444,7 +508,7 @@ impl CellGrid {
         for r in top..top + n {
             let start = r * cols;
             if start + cols <= self.cells.len() {
-                self.cells[start..start + cols].fill(Cell::default());
+                self.cells[start..start + cols].fill(blank);
             }
         }
     }
@@ -534,9 +598,37 @@ mod tests {
             c.ch = 'X';
         }
         grid.erase_display(2);
+        // Erase fills with space (not null), with current background color
         for c in &grid.cells {
-            assert_eq!(c.ch, '\0');
+            assert_eq!(c.ch, ' ');
+            assert_eq!(c.bg, TermColor::Default); // default bg when no color set
         }
+    }
+
+    #[test]
+    fn erase_display_preserves_background_color() {
+        let mut grid = CellGrid::new(5, 3);
+        // Set a background color, then erase — erased cells should have that bg
+        grid.set_sgr(&[41]); // bg = red (ANSI 1)
+        grid.erase_display(2);
+        for c in &grid.cells {
+            assert_eq!(c.ch, ' ');
+            assert_eq!(c.bg, TermColor::Ansi(1));
+        }
+    }
+
+    #[test]
+    fn erase_line_preserves_background_color() {
+        let mut grid = CellGrid::new(10, 3);
+        grid.set_sgr(&[42]); // bg = green (ANSI 2)
+        grid.cursor_set(0, 1);
+        grid.erase_line(2); // erase entire line 1
+        for col in 0..10 {
+            let idx = 10 + col;
+            assert_eq!(grid.cells[idx].bg, TermColor::Ansi(2), "col {col}");
+        }
+        // Other lines unaffected
+        assert_eq!(grid.cells[0].bg, TermColor::Default);
     }
 
     #[test]
@@ -547,5 +639,59 @@ mod tests {
         assert_eq!(grid.cols, 10);
         assert_eq!(grid.rows, 5);
         assert_eq!(grid.cells[0].ch, 'A');
+    }
+
+    #[test]
+    fn put_char_wide_advances_two_columns() {
+        let mut grid = CellGrid::new(20, 5);
+        // CJK character (double-width)
+        grid.put_char('\u{4E16}'); // '世' (U+4E16, width=2)
+        assert_eq!(grid.cursor_x, 2);
+        assert_eq!(grid.cells[0].ch, '\u{4E16}');
+        // Spacer cell follows
+        assert_eq!(grid.cells[1].ch, '\0');
+        // Next char should land at column 2
+        grid.put_char('A');
+        assert_eq!(grid.cursor_x, 3);
+        assert_eq!(grid.cells[2].ch, 'A');
+    }
+
+    #[test]
+    fn put_char_emoji_wide() {
+        let mut grid = CellGrid::new(20, 5);
+        grid.put_char('\u{1F550}'); // '🕐' (U+1F550, width=2)
+        assert_eq!(grid.cursor_x, 2);
+        assert_eq!(grid.cells[0].ch, '\u{1F550}');
+        assert_eq!(grid.cells[1].ch, '\0'); // spacer
+        grid.put_char('x');
+        assert_eq!(grid.cursor_x, 3);
+        assert_eq!(grid.cells[2].ch, 'x');
+    }
+
+    #[test]
+    fn put_char_variation_selector_zero_width() {
+        let mut grid = CellGrid::new(20, 5);
+        // '❄' (U+2744) followed by variation selector U+FE0F (zero-width)
+        grid.put_char('\u{2744}');
+        let after_snowflake = grid.cursor_x;
+        grid.put_char('\u{FE0F}'); // variation selector — should NOT advance cursor
+        assert_eq!(grid.cursor_x, after_snowflake);
+        // Next char should land right after the snowflake
+        grid.put_char('A');
+        assert_eq!(grid.cells[after_snowflake as usize].ch, 'A');
+    }
+
+    #[test]
+    fn put_char_wide_at_end_of_line() {
+        let mut grid = CellGrid::new(5, 3);
+        // Fill up to column 4 (last column)
+        grid.cursor_x = 4;
+        // Wide char at position 4 — only 1 col remaining, should wrap
+        grid.put_char('\u{4E16}'); // '世' (width=2)
+                                   // Should have wrapped to next line
+        assert_eq!(grid.cursor_y, 1);
+        assert_eq!(grid.cursor_x, 2); // wrote at col 0, spacer at col 1
+        assert_eq!(grid.cells[5].ch, '\u{4E16}'); // row 1, col 0
+        assert_eq!(grid.cells[6].ch, '\0'); // spacer
     }
 }

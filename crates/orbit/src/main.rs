@@ -1,14 +1,13 @@
-mod app;
 mod events;
 mod ipc;
-mod tui;
 
 use anyhow::{Context, Result};
 use orbit_protocol::ClientMessage;
 use tracing::debug;
 
-use crate::app::App;
 use crate::ipc::IpcClient;
+use orbit_tui::app::{load_settings, App};
+use orbit_tui::tui;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -40,11 +39,11 @@ async fn main() -> Result<()> {
 
     let mut app = App::from_welcome(&state, total_cols, total_rows);
 
-    let settings = crate::app::load_settings();
+    let settings = load_settings();
     app.theme_name = settings.theme.clone();
     app.sidebar_visible = settings.sidebar_visible;
     app.agent_panel_visible = settings.agent_panel_visible;
-    crate::tui::theme::set_theme(&app.theme_name);
+    orbit_tui::tui::theme::set_theme(&app.theme_name);
 
     let pane_area = ratatui::layout::Rect {
         x: 0,

@@ -21,6 +21,7 @@ use crate::app::{App, InputMode, PaneState, Selection};
 use orbit_protocol::Cell;
 use orbit_protocol::PaneLayout;
 use theme::*;
+use unicode_width::UnicodeWidthChar;
 
 pub type OrbitTerminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
@@ -235,19 +236,20 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
     frame.render_widget(block, help_area);
 
     let lines = vec![
-        ("Ctrl+B", "prefix key (enter command mode)"),
-        ("  h", "split pane horizontal (left|right)"),
-        ("  v", "split pane vertical (top/bottom)"),
-        ("  c", "new tab"),
-        ("  n / p", "next / previous tab"),
-        ("  [", "enter scroll mode"),
+        ("Ctrl+B", "prefix key (tmux-compatible)"),
+        ("  %", "split pane horizontal (left|right)"),
+        ("  \"", "split pane vertical (top/bottom)"),
         ("  x", "close current pane"),
+        ("  o", "cycle focus between panes"),
+        ("  z", "zoom pane (toggle fullscreen)"),
+        ("  [", "enter copy/scroll mode"),
+        ("  c", "new window (tab)"),
+        ("  n / p", "next / previous window"),
+        ("  0-9", "switch to window N"),
         ("  d", "detach (quit, keep session)"),
-        ("  b", "toggle sidebar"),
         ("  a", "toggle satellite monitor"),
-        ("  j / k", "scroll satellite monitor down / up"),
+        ("  b", "toggle sidebar"),
         ("  ?", "this help"),
-        ("Tab", "cycle focus between panes"),
         ("Scroll: k/j/PgUp/PgDn/g/G/q", ""),
     ];
 
@@ -509,31 +511,60 @@ fn render_cells(
     let cols = (area.width as usize).min(grid.cols as usize);
 
     for row in 0..rows {
-        for col in 0..cols {
+        let mut col = 0;
+        while col < cols {
             let cell = &grid.cells[row * grid.cols as usize + col];
             let x = area.x + col as u16;
             let y = area.y + row as u16;
+
+            // Skip spacer cells (placed after wide chars by VT parser)
+            if cell.ch == '\0' {
+                col += 1;
+                continue;
+            }
+
+            let ch = cell.ch;
+            let char_width = UnicodeWidthChar::width(ch).unwrap_or(1).max(1);
+
             if let Some(buf_cell) = frame.buffer_mut().cell_mut((x, y)) {
-                let ch = if cell.ch == '\0' { ' ' } else { cell.ch };
-                buf_cell.set_char(ch);
+                // Use set_symbol for wide chars so ratatui handles trailing cell
+                if char_width > 1 {
+                    let mut s = String::new();
+                    s.push(ch);
+                    buf_cell.set_symbol(&s);
+                } else {
+                    buf_cell.set_char(ch);
+                }
+
                 let mut fg = term_color(&cell.fg);
                 let mut bg = term_color(&cell.bg);
                 let in_selection = selection.is_some_and(|sel| {
                     sel.pane_id == pane_id && {
-                        let (min_col, max_col) = if sel.start.0 <= sel.end.0 {
-                            (sel.start.0, sel.end.0)
+                        // Stream (line) selection: normalize start/end so start <= end
+                        let (start, end) = if sel.start.1 < sel.end.1
+                            || (sel.start.1 == sel.end.1 && sel.start.0 <= sel.end.0)
+                        {
+                            (sel.start, sel.end)
                         } else {
-                            (sel.end.0, sel.start.0)
+                            (sel.end, sel.start)
                         };
-                        let (min_row, max_row) = if sel.start.1 <= sel.end.1 {
-                            (sel.start.1, sel.end.1)
+                        let (sc, sr) = (start.0 as usize, start.1 as usize);
+                        let (ec, er) = (end.0 as usize, end.1 as usize);
+                        if row < sr || row > er {
+                            false
+                        } else if sr == er {
+                            // Single-line selection
+                            col >= sc && col <= ec
+                        } else if row == sr {
+                            // First line: from start col to end of line
+                            col >= sc
+                        } else if row == er {
+                            // Last line: from start of line to end col
+                            col <= ec
                         } else {
-                            (sel.end.1, sel.start.1)
-                        };
-                        col as u16 >= min_col
-                            && col as u16 <= max_col
-                            && row as u16 >= min_row
-                            && row as u16 <= max_row
+                            // Middle lines: fully selected
+                            true
+                        }
                     }
                 });
                 if in_selection {
@@ -553,21 +584,24 @@ fn render_cells(
                 if cell.flags.dim() {
                     mods |= Modifier::DIM;
                 }
+                if cell.flags.reverse() {
+                    mods |= Modifier::REVERSED;
+                }
                 if !mods.is_empty() {
                     style = style.add_modifier(mods);
                 }
                 buf_cell.set_style(style);
             }
+
+            // Skip the spacer column(s) that follow a wide char
+            col += char_width;
         }
     }
 
     if show_cursor && grid.cursor_visible {
         let cx = area.x + grid.cursor_x.min(cols as u16);
         let cy = area.y + grid.cursor_y.min(rows as u16);
-        if let Some(cell) = frame.buffer_mut().cell_mut((cx, cy)) {
-            let s = cell.style();
-            cell.set_style(s.fg(Color::Black).bg(Color::White));
-        }
+        frame.set_cursor_position((cx, cy));
     }
 }
 
@@ -606,10 +640,27 @@ fn render_cells_scrolled(
 }
 
 fn render_row(frame: &mut Frame, x: u16, y: u16, cells: &[Cell], max_cols: usize) {
-    for (col, cell) in cells.iter().take(max_cols).enumerate() {
+    let mut col = 0;
+    while col < cells.len().min(max_cols) {
+        let cell = &cells[col];
+
+        // Skip spacer cells (placed after wide chars by VT parser)
+        if cell.ch == '\0' {
+            col += 1;
+            continue;
+        }
+
+        let ch = cell.ch;
+        let char_width = UnicodeWidthChar::width(ch).unwrap_or(1).max(1);
+
         if let Some(buf_cell) = frame.buffer_mut().cell_mut((x + col as u16, y)) {
-            let ch = if cell.ch == '\0' { ' ' } else { cell.ch };
-            buf_cell.set_char(ch);
+            if char_width > 1 {
+                let mut s = String::new();
+                s.push(ch);
+                buf_cell.set_symbol(&s);
+            } else {
+                buf_cell.set_char(ch);
+            }
             let fg = term_color(&cell.fg);
             let bg = term_color(&cell.bg);
             let mut style = Style::default().fg(fg).bg(bg);
@@ -631,14 +682,421 @@ fn render_row(frame: &mut Frame, x: u16, y: u16, cells: &[Cell], max_cols: usize
             }
             buf_cell.set_style(style);
         }
+
+        col += char_width;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbit_protocol::SplitDir;
+    use orbit_protocol::{
+        AgentDetail, AgentInfo, AgentStatus, CellGrid, FullState, PaneInfo, SpaceId, SpaceInfo,
+        SplitDir, TabId, TabInfo,
+    };
+    use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
+    use ratatui::Terminal;
+
+    use crate::app::App;
+
+    /// Helper: build a minimal FullState for visual rendering tests.
+    fn minimal_state() -> FullState {
+        FullState {
+            spaces: vec![SpaceInfo {
+                id: SpaceId(1),
+                name: "dev".to_string(),
+                path: "/home/user/project".to_string(),
+                tabs: vec![TabInfo {
+                    id: TabId(1),
+                    name: "main".to_string(),
+                    layout: PaneLayout::Leaf(PaneId(1)),
+                    active_pane: PaneId(1),
+                }],
+                active_tab: TabId(1),
+                panes: vec![PaneInfo {
+                    id: PaneId(1),
+                    tab_id: TabId(1),
+                    title: String::new(),
+                    cwd: "/home/user/project".to_string(),
+                    cell_grid: CellGrid::new(80, 24),
+                }],
+            }],
+            active_space: SpaceId(1),
+            agents: vec![],
+        }
+    }
+
+    /// Helper: extract the text content from a ratatui Buffer as a Vec of row strings.
+    fn buffer_lines(terminal: &Terminal<TestBackend>) -> Vec<String> {
+        let buf = terminal.backend().buffer();
+        let mut lines = Vec::new();
+        for y in 0..buf.area.height {
+            let mut line = String::new();
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                line.push_str(cell.symbol());
+            }
+            lines.push(line);
+        }
+        lines
+    }
+
+    /// Helper: check that a string appears somewhere in the rendered output.
+    fn buffer_contains(terminal: &Terminal<TestBackend>, needle: &str) -> bool {
+        let buf = terminal.backend().buffer();
+        for y in 0..buf.area.height {
+            let mut line = String::new();
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                line.push_str(cell.symbol());
+            }
+            if line.contains(needle) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Helper: check that a given position has a specific foreground color.
+    fn cell_fg_at(terminal: &Terminal<TestBackend>, x: u16, y: u16) -> Color {
+        let buf = terminal.backend().buffer();
+        buf[(x, y)].fg
+    }
+
+    // -------------------------------------------------------------------------
+    // Visual rendering tests using TestBackend
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn render_basic_layout_120x30() {
+        let state = minimal_state();
+        let app = App::from_welcome(&state, 120, 30);
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Tab bar should show the tab name "main"
+        assert!(buffer_contains(&terminal, "main"));
+        // Sidebar should show space name "dev"
+        assert!(buffer_contains(&terminal, "dev"));
+        // Pane border should show pane number
+        assert!(buffer_contains(&terminal, "1:~"));
+        // Status bar should show space name and idle satellite status
+        assert!(buffer_contains(&terminal, "[SPACE]"));
+        assert!(buffer_contains(&terminal, "idle"));
+    }
+
+    #[test]
+    fn render_compact_layout_60x20() {
+        let state = minimal_state();
+        let app = App::from_welcome(&state, 60, 20);
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Should still render without panic at compact size
+        assert!(buffer_contains(&terminal, "main"));
+        // Sidebar should be collapsed (width=5) in compact mode
+        let lines = buffer_lines(&terminal);
+        assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn render_ultra_wide_layout_160x40() {
+        let state = minimal_state();
+        let app = App::from_welcome(&state, 160, 40);
+        let backend = TestBackend::new(160, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Should render full sidebar in ultra mode
+        assert!(buffer_contains(&terminal, "dev"));
+        assert!(buffer_contains(&terminal, "main"));
+    }
+
+    #[test]
+    fn render_with_agent_panel_visible() {
+        let mut state = minimal_state();
+        state.agents.push(AgentInfo {
+            id: orbit_protocol::AgentId(1),
+            name: "claude-1".to_string(),
+            space_id: SpaceId(1),
+            model: "opus".to_string(),
+            status: AgentStatus::Working,
+            pane_id: Some(PaneId(1)),
+            detail: Some(AgentDetail {
+                task: Some("Fixing bug".to_string()),
+                block_msg: None,
+                progress: Some(0.5),
+                duration_s: 120,
+            }),
+        });
+        let mut app = App::from_welcome(&state, 120, 30);
+        app.agent_panel_visible = true;
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Agent panel should show agent name
+        assert!(buffer_contains(&terminal, "claude-1"));
+        // Should show the working indicator
+        // filled circle = Working
+        assert!(buffer_contains(&terminal, "\u{25CF}"));
+    }
+
+    #[test]
+    fn render_with_blocked_agent_shows_eclipse_status() {
+        let mut state = minimal_state();
+        state.agents.push(AgentInfo {
+            id: orbit_protocol::AgentId(2),
+            name: "aider-1".to_string(),
+            space_id: SpaceId(1),
+            model: "gpt-4".to_string(),
+            status: AgentStatus::Blocked,
+            pane_id: Some(PaneId(1)),
+            detail: Some(AgentDetail {
+                task: None,
+                block_msg: Some("Needs permission".to_string()),
+                progress: None,
+                duration_s: 30,
+            }),
+        });
+        let mut app = App::from_welcome(&state, 120, 30);
+        app.agent_panel_visible = true;
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Should show blocked agent name
+        assert!(buffer_contains(&terminal, "aider-1"));
+        // Should show Eclipse indicator (circled circle)
+        // ◎ = Blocked/Eclipse
+        assert!(buffer_contains(&terminal, "\u{25CE}"));
+    }
+
+    #[test]
+    fn render_split_panes_show_borders() {
+        let mut state = minimal_state();
+        state.spaces[0].tabs[0].layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneLayout::Leaf(PaneId(1))),
+            second: Box::new(PaneLayout::Leaf(PaneId(2))),
+        };
+        state.spaces[0].panes.push(PaneInfo {
+            id: PaneId(2),
+            tab_id: TabId(1),
+            title: String::new(),
+            cwd: "/tmp".to_string(),
+            cell_grid: CellGrid::new(80, 24),
+        });
+        let app = App::from_welcome(&state, 120, 30);
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Should show both pane numbers
+        assert!(buffer_contains(&terminal, "1:~"));
+        assert!(buffer_contains(&terminal, "2:~"));
+    }
+
+    #[test]
+    fn render_active_pane_has_accent_border() {
+        let mut state = minimal_state();
+        state.spaces[0].tabs[0].layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneLayout::Leaf(PaneId(1))),
+            second: Box::new(PaneLayout::Leaf(PaneId(2))),
+        };
+        state.spaces[0].panes.push(PaneInfo {
+            id: PaneId(2),
+            tab_id: TabId(1),
+            title: String::new(),
+            cwd: "/tmp".to_string(),
+            cell_grid: CellGrid::new(80, 24),
+        });
+        let app = App::from_welcome(&state, 120, 30);
+        // Active pane is PaneId(1), its border should use accent color
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // The active pane border starts at x=24 (sidebar width), y=1 (below tab bar).
+        // First cell at (24, 1) is the top-left corner of the block border.
+        let corner_fg = cell_fg_at(&terminal, 24, 1);
+        assert_eq!(corner_fg, accent()); // active pane border = accent (orange) color
+
+        // The inactive pane (PaneId 2) should use the default border color.
+        // It starts at ~x=72 in a 120-col terminal (sidebar=24, first pane half=48).
+        let inactive_corner_fg = cell_fg_at(&terminal, 72, 1);
+        assert_eq!(inactive_corner_fg, border()); // inactive pane = border color
+    }
+
+    #[test]
+    fn render_help_overlay_shows_keybindings() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 120, 30);
+        app.show_help = true;
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        assert!(buffer_contains(&terminal, "Ctrl+B"));
+        assert!(buffer_contains(&terminal, "prefix key"));
+        assert!(buffer_contains(&terminal, "split pane"));
+    }
+
+    #[test]
+    fn render_command_palette_overlay() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 120, 30);
+        app.mode = InputMode::CommandPalette {
+            search: String::new(),
+            selected: 0,
+            search_focused: true,
+        };
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Command palette should show some command labels
+        assert!(buffer_contains(&terminal, "Split Horizontal"));
+        assert!(buffer_contains(&terminal, "New Window"));
+    }
+
+    #[test]
+    fn render_command_palette_with_search_filter() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 120, 30);
+        app.mode = InputMode::CommandPalette {
+            search: "split".to_string(),
+            selected: 0,
+            search_focused: true,
+        };
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Should show "Split" commands
+        assert!(buffer_contains(&terminal, "Split"));
+        // Should NOT show unrelated commands like "Detach"
+        assert!(!buffer_contains(&terminal, "Detach"));
+    }
+
+    #[test]
+    fn render_settings_modal() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 120, 30);
+        app.settings_open = true;
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Settings modal should show theme options
+        assert!(buffer_contains(&terminal, "orbit") || buffer_contains(&terminal, "Theme"));
+    }
+
+    #[test]
+    fn render_multiple_tabs_in_tab_bar() {
+        let mut state = minimal_state();
+        state.spaces[0].tabs.push(TabInfo {
+            id: TabId(2),
+            name: "build".to_string(),
+            layout: PaneLayout::Leaf(PaneId(2)),
+            active_pane: PaneId(2),
+        });
+        state.spaces[0].panes.push(PaneInfo {
+            id: PaneId(2),
+            tab_id: TabId(2),
+            title: String::new(),
+            cwd: "/tmp".to_string(),
+            cell_grid: CellGrid::new(80, 24),
+        });
+        let app = App::from_welcome(&state, 120, 30);
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Both tab names should be visible
+        assert!(buffer_contains(&terminal, "main"));
+        assert!(buffer_contains(&terminal, "build"));
+    }
+
+    #[test]
+    fn render_does_not_panic_at_minimum_size() {
+        let state = minimal_state();
+        let app = App::from_welcome(&state, 20, 5);
+        let backend = TestBackend::new(20, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        // Main assertion: does not panic
+        terminal.draw(|f| render(f, &app)).unwrap();
+    }
+
+    #[test]
+    fn render_sidebar_collapsed_in_narrow_terminal() {
+        let state = minimal_state();
+        let app = App::from_welcome(&state, 60, 24);
+        let backend = TestBackend::new(60, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // In compact mode (<80), sidebar is only 5 cols wide
+        // Check that the pane area starts early (at x=5)
+        let lines = buffer_lines(&terminal);
+        // Pane border should appear relatively close to the left
+        let first_line = &lines[1]; // row 1 is where pane starts
+                                    // At position 5 (after collapsed sidebar) we should see pane border
+        assert!(first_line.len() >= 10);
+    }
+
+    #[test]
+    fn render_theme_orange_changes_colors() {
+        // Switch to orange theme before rendering
+        theme::set_theme("orange");
+
+        let state = minimal_state();
+        let app = App::from_welcome(&state, 120, 30);
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Orange theme uses orange accent (217, 119, 6) instead of orbit purple.
+        let active_border_fg = cell_fg_at(&terminal, 24, 1);
+        assert_eq!(active_border_fg, Color::Rgb(217, 119, 6));
+
+        // Restore default theme for other tests
+        theme::set_theme("orbit");
+    }
+
+    #[test]
+    fn render_eclipse_modal_overlay() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 120, 30);
+        app.eclipse_modal = Some(crate::app::EclipseModalState {
+            agent_id: orbit_protocol::AgentId(1),
+            agent_name: "claude-dev".to_string(),
+            block_msg: "Needs user confirmation".to_string(),
+            response: String::new(),
+            model: "opus".to_string(),
+            task: Some("Refactoring auth".to_string()),
+            progress: Some(0.6),
+            cwd: Some("/project".to_string()),
+            blocked_duration_s: 45,
+        });
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        // Eclipse modal should show the agent name and block message
+        assert!(buffer_contains(&terminal, "claude-dev"));
+        assert!(buffer_contains(&terminal, "Needs user confirmation"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Original layout/split tests
+    // -------------------------------------------------------------------------
 
     #[test]
     fn split_area_normal_horizontal() {

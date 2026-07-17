@@ -13,3 +13,9 @@
 
 # Note: Cargo.lock IS tracked in git — this is an application project, not a library.
 core.*
+
+# Diagnostic/test tools (local only)
+/tools/target/
+
+# Local development docs (private, not for repo)
+/docs/

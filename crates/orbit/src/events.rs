@@ -6,9 +6,9 @@ use futures::StreamExt;
 use orbit_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
 
-use crate::app::{AgentHover, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
 use crate::ipc::{IpcClient, IpcWriter};
-use crate::tui::{agent_panel_width, render, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
+use orbit_tui::app::{AgentHover, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
+use orbit_tui::tui::{agent_panel_width, render, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
 
 fn is_prefix_key(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b')
@@ -42,7 +42,7 @@ fn key_to_pty_bytes(key: &KeyEvent) -> Option<Vec<u8>> {
         (_, KeyCode::Char(c)) => Some(c.to_string().into_bytes()),
         (_, KeyCode::Enter) => Some(b"\r".to_vec()),
         (_, KeyCode::Backspace) => Some(b"\x7f".to_vec()),
-        (_, KeyCode::Tab) => None,
+        (_, KeyCode::Tab) => Some(b"\t".to_vec()),
         (_, KeyCode::Up) => Some(b"\x1b[A".to_vec()),
         (_, KeyCode::Down) => Some(b"\x1b[B".to_vec()),
         (_, KeyCode::Right) => Some(b"\x1b[C".to_vec()),
@@ -113,6 +113,18 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
                 })
                 .await;
         }
+        "cycle_pane" => {
+            app.cycle_focus();
+            let _ = writer
+                .send(ClientMessage::FocusPane {
+                    tab_id: app.active_tab_id,
+                    pane_id: app.active_pane,
+                })
+                .await;
+        }
+        "zoom_pane" => {
+            // Zoom is a placeholder — future: toggle pane fullscreen
+        }
         "scroll_mode" => {
             app.selection = None;
             app.mode = InputMode::Scroll { offset: 1 };
@@ -138,7 +150,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
         }
         "toggle_sidebar" => {
             app.sidebar_visible = !app.sidebar_visible;
-            crate::app::save_settings(app);
+            orbit_tui::app::save_settings(app);
         }
         "toggle_agent" => {
             app.agent_panel_visible = !app.agent_panel_visible;
@@ -154,7 +166,7 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
                 app.mode = InputMode::Normal;
                 app.agent_hovered = None;
             }
-            crate::app::save_settings(app);
+            orbit_tui::app::save_settings(app);
         }
         "agent_scroll_up" => {
             if app.agent_panel_visible {
@@ -181,13 +193,14 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
         }
         "detach" => app.should_quit = true,
         "toggle_theme" => {
-            app.theme_name = if app.theme_name == "orbit" {
-                "tokyo-night".to_string()
-            } else {
-                "orbit".to_string()
-            };
-            crate::tui::theme::set_theme(&app.theme_name);
-            crate::app::save_settings(app);
+            let themes = orbit_tui::tui::theme::ALL_THEMES;
+            let idx = themes
+                .iter()
+                .position(|&t| t == app.theme_name)
+                .unwrap_or(0);
+            app.theme_name = themes[(idx + 1) % themes.len()].to_string();
+            orbit_tui::tui::theme::set_theme(&app.theme_name);
+            orbit_tui::app::save_settings(app);
         }
         "settings" => {
             app.settings_open = true;
@@ -267,12 +280,13 @@ async fn execute_context_action(
                     };
                     let cols = grid.cols as usize;
                     let max_row_clamped = max_row.min(grid.rows as usize - 1);
-                    let max_col_clamped = max_col.min(cols - 1);
+                    let min_col_clamped = min_col.min(cols.saturating_sub(1));
+                    let max_col_clamped = max_col.min(cols.saturating_sub(1));
                     let mut lines: Vec<String> = Vec::new();
                     for row in min_row..=max_row_clamped {
                         let row_start = row * cols;
                         let line: String = grid.cells
-                            [row_start + min_col..=row_start + max_col_clamped]
+                            [row_start + min_col_clamped..=row_start + max_col_clamped]
                             .iter()
                             .map(|c| if c.ch == '\0' { ' ' } else { c.ch })
                             .collect::<String>()
@@ -288,7 +302,19 @@ async fn execute_context_action(
                 app.selection = None;
             }
         }
-        "maximize" | "move_up" | "move_down" | "rename_space" | "close_space" | "new_space" => {}
+        "maximize" | "move_up" | "move_down" | "rename_space" => {}
+        "close_space" => {
+            if let ContextMenuTarget::Space(space_id) = target {
+                let _ = writer
+                    .send(ClientMessage::CloseSpace {
+                        space_id: *space_id,
+                    })
+                    .await;
+            }
+        }
+        "new_space" => {
+            let _ = writer.send(ClientMessage::CreateSpace { name: None }).await;
+        }
         _ => {}
     }
     app.needs_redraw = true;
@@ -364,22 +390,23 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
             }
             KeyCode::Enter | KeyCode::Char(' ') => match app.settings_selected {
                 0 => {
-                    app.theme_name = if app.theme_name == "orbit" {
-                        "tokyo-night".to_string()
-                    } else {
-                        "orbit".to_string()
-                    };
-                    crate::tui::theme::set_theme(&app.theme_name);
-                    crate::app::save_settings(app);
+                    let themes = orbit_tui::tui::theme::ALL_THEMES;
+                    let idx = themes
+                        .iter()
+                        .position(|&t| t == app.theme_name)
+                        .unwrap_or(0);
+                    app.theme_name = themes[(idx + 1) % themes.len()].to_string();
+                    orbit_tui::tui::theme::set_theme(&app.theme_name);
+                    orbit_tui::app::save_settings(app);
                 }
                 1 => {
                     app.sidebar_visible = !app.sidebar_visible;
                     app.needs_resize = true;
-                    crate::app::save_settings(app);
+                    orbit_tui::app::save_settings(app);
                 }
                 2 => {
                     app.agent_panel_visible = !app.agent_panel_visible;
-                    crate::app::save_settings(app);
+                    orbit_tui::app::save_settings(app);
                 }
                 _ => {}
             },
@@ -409,16 +436,8 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                 app.needs_redraw = true;
                 return;
             }
-            if key.code == KeyCode::Tab && app.pane_tree().leaves().len() > 1 {
-                app.cycle_focus();
-                let _ = writer
-                    .send(ClientMessage::FocusPane {
-                        tab_id: app.active_tab_id,
-                        pane_id: app.active_pane,
-                    })
-                    .await;
-                return;
-            }
+            // Tab key is forwarded to PTY (pane cycling is prefix+o, tmux-style)
+
             if let Some(bytes) = key_to_pty_bytes(&key) {
                 let _ = writer
                     .send(ClientMessage::PaneInput {
@@ -444,7 +463,11 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
             }
 
             if search.is_empty() {
-                let layout = &app.tabs[app.active_tab].pane_tree;
+                let Some(tab) = app.tabs.get(app.active_tab) else {
+                    app.mode = InputMode::Normal;
+                    return;
+                };
+                let layout = &tab.pane_tree;
                 let target = match key.code {
                     KeyCode::Left => layout.find_pane_in_direction(
                         app.active_pane,
@@ -504,6 +527,26 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                     *selected = 0;
                 }
                 KeyCode::Char(c) => {
+                    // tmux: 0-9 switches to window N
+                    if search.is_empty() && c.is_ascii_digit() {
+                        let idx = (c as u8 - b'0') as usize;
+                        if idx < app.tabs.len() {
+                            app.selection = None;
+                            app.active_tab = idx;
+                            app.active_tab_id = app.tabs[idx].id;
+                            if let Some(&first) = app.pane_tree().leaves().first() {
+                                app.active_pane = first;
+                            }
+                            let _ = writer
+                                .send(ClientMessage::SwitchTab {
+                                    tab_id: app.active_tab_id,
+                                })
+                                .await;
+                        }
+                        app.mode = InputMode::Normal;
+                        app.needs_redraw = true;
+                        return;
+                    }
                     let sc = c.to_string();
                     let shortcut_cmd = search
                         .is_empty()
@@ -532,7 +575,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                 .get(&app.active_pane)
                 .map(|p| p.scrollback.len())
                 .unwrap_or(0);
-            let max_offset = scrollback_len + pane_height;
+            let max_offset = scrollback_len;
 
             match key.code {
                 KeyCode::Up | KeyCode::Char('k') => *offset = (*offset + 1).min(max_offset),
@@ -646,7 +689,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                 }
                 // n: open Launch Satellite picker (new satellite)
                 KeyCode::Char('n') => {
-                    crate::tui::widgets::launch_modal::open(app);
+                    orbit_tui::tui::widgets::launch_modal::open(app);
                 }
                 // r: respond to blocked agent (opens Eclipse modal)
                 KeyCode::Char('r') => {
@@ -655,7 +698,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                         let agent_id = agent.id;
                         match agent.status {
                             orbit_protocol::AgentStatus::Blocked => {
-                                crate::tui::widgets::eclipse_modal::open(app, agent_id);
+                                orbit_tui::tui::widgets::eclipse_modal::open(app, agent_id);
                             }
                             orbit_protocol::AgentStatus::Error => {
                                 let _ = writer.send(ClientMessage::AgentRestart { agent_id }).await;
@@ -718,14 +761,14 @@ fn resize_local_grids_for_areas(
 
 fn resize_local_grids(app: &mut App, term_cols: u16, term_rows: u16) {
     let pane_area = compute_pane_area(term_cols, term_rows, app);
-    let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+    let areas = orbit_tui::tui::compute_leaf_areas(app.pane_tree(), pane_area);
     resize_local_grids_for_areas(app, &areas);
 }
 
 async fn send_pane_resizes(app: &mut App, writer: &IpcWriter, term_cols: u16, term_rows: u16) {
     resize_local_grids(app, term_cols, term_rows);
     let pane_area = compute_pane_area(term_cols, term_rows, app);
-    let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+    let areas = orbit_tui::tui::compute_leaf_areas(app.pane_tree(), pane_area);
     for (pid, rect) in areas {
         let pc = rect.width.saturating_sub(2).max(1);
         let pr = rect.height.saturating_sub(2).max(1);
@@ -747,7 +790,7 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
     app.needs_redraw = true;
 
     loop {
-        crate::tui::theme::set_theme(&app.theme_name);
+        orbit_tui::tui::theme::set_theme(&app.theme_name);
 
         if app.needs_redraw {
             terminal.draw(|frame| render(frame, app))?;
@@ -820,7 +863,7 @@ async fn do_launch(app: &mut App, writer: &IpcWriter) {
     let Some(modal) = &app.launch_modal else {
         return;
     };
-    let name = crate::app::LAUNCH_AGENTS
+    let name = orbit_tui::app::LAUNCH_AGENTS
         .get(modal.selected)
         .map(|(cmd, _)| cmd.to_string())
         .unwrap_or_else(|| "claude".to_string());
@@ -847,7 +890,7 @@ async fn handle_launch_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
     let Some(modal) = &app.launch_modal else {
         return;
     };
-    let n = crate::app::LAUNCH_AGENTS.len();
+    let n = orbit_tui::app::LAUNCH_AGENTS.len();
     match key.code {
         KeyCode::Esc => {
             app.launch_modal = None;
@@ -887,9 +930,10 @@ async fn handle_launch_modal_mouse(
         return;
     };
     // Mirror geometry from launch_modal::render.
-    let n = crate::app::LAUNCH_AGENTS.len() as u16;
+    let n = orbit_tui::app::LAUNCH_AGENTS.len() as u16;
     let modal_h = (n + 6).min(term_size.height.saturating_sub(4));
-    let modal_w = crate::tui::widgets::launch_modal::MODAL_W.min(term_size.width.saturating_sub(4));
+    let modal_w =
+        orbit_tui::tui::widgets::launch_modal::MODAL_W.min(term_size.width.saturating_sub(4));
     let modal_x = (term_size.width.saturating_sub(modal_w)) / 2;
     let modal_y = (term_size.height.saturating_sub(modal_h)) / 2;
 
@@ -906,7 +950,7 @@ async fn handle_launch_modal_mouse(
 
     let inner_x = modal_x + 1;
     // Agent rows start at modal_y+3 (border + blank + "Agent:" label).
-    let agents_start = modal_y + 4;
+    let agents_start = modal_y + 3;
     let agents_end = agents_start + n;
     let btn_row = modal_y + modal_h.saturating_sub(2);
 
@@ -1006,7 +1050,7 @@ async fn handle_mouse(
         return;
     }
 
-    if let crate::app::InputMode::CommandPalette {
+    if let orbit_tui::app::InputMode::CommandPalette {
         search, selected, ..
     } = &mut app.mode
     {
@@ -1059,7 +1103,7 @@ async fn handle_mouse(
     if let Some((menu_x, menu_y, menu_w, is_action)) = ctx_info {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                let mut clicked: Option<(&'static str, crate::app::ContextMenuTarget)> = None;
+                let mut clicked: Option<(&'static str, orbit_tui::app::ContextMenuTarget)> = None;
                 for (i, &is_act) in is_action.iter().enumerate() {
                     if is_act
                         && mouse.row == menu_y + 1 + i as u16
@@ -1249,7 +1293,9 @@ async fn handle_mouse(
                     y += 4;
                 }
                 // Bottom bar: [+] New (left half) | ≡ Command (right half)
-                if mouse.row + 1 == term_h {
+                // Rendered at sidebar_area.y + sidebar_area.height - 1
+                // = 0 + (term_h - 1) - 1 = term_h - 2
+                if mouse.row + 2 == term_h {
                     if mouse.column < SIDEBAR_W / 2 {
                         let _ = writer
                             .send(orbit_protocol::ClientMessage::CreateSpace { name: None })
@@ -1275,7 +1321,7 @@ async fn handle_mouse(
 
                 // Footer row (last row): "[+] Add Satellite"
                 if mouse.row + 1 == term_h {
-                    crate::tui::widgets::launch_modal::open(app);
+                    orbit_tui::tui::widgets::launch_modal::open(app);
                     return;
                 }
 
@@ -1294,7 +1340,7 @@ async fn handle_mouse(
                         && mouse.column <= term_w.saturating_sub(2)
                     {
                         // [+] add — open the Launch Satellite picker overlay
-                        crate::tui::widgets::launch_modal::open(app);
+                        orbit_tui::tui::widgets::launch_modal::open(app);
                         return;
                     }
                 }
@@ -1315,13 +1361,13 @@ async fn handle_mouse(
                         .find(|a| a.status == orbit_protocol::AgentStatus::Blocked)
                     {
                         let agent_id = blocked.id;
-                        crate::tui::widgets::eclipse_modal::open(app, agent_id);
+                        orbit_tui::tui::widgets::eclipse_modal::open(app, agent_id);
                     }
                     return;
                 }
 
                 // Card button clicks — iterate only the visible (scrolled) agents.
-                let base_row = crate::tui::widgets::agent_monitor::card_start_row(
+                let base_row = orbit_tui::tui::widgets::agent_monitor::card_start_row(
                     0,
                     app.agent_scroll_offset,
                     any_blocked,
@@ -1402,7 +1448,7 @@ async fn handle_mouse(
                                 }
                                 // Slot 1: [Resp] (Blocked) — open Eclipse modal
                                 (1, orbit_protocol::AgentStatus::Blocked) => {
-                                    crate::tui::widgets::eclipse_modal::open(app, agent_id);
+                                    orbit_tui::tui::widgets::eclipse_modal::open(app, agent_id);
                                 }
                                 // Slot 2: [Abrt] (Blocked)
                                 (2, orbit_protocol::AgentStatus::Blocked) => {
@@ -1480,7 +1526,7 @@ async fn handle_mouse(
             }
 
             let pane_area = content_area(term_size, app);
-            if let Some((first_pane, second_pane, dir)) = crate::tui::find_split_at_cursor(
+            if let Some((first_pane, second_pane, dir)) = orbit_tui::tui::find_split_at_cursor(
                 app.pane_tree(),
                 pane_area,
                 mouse.column,
@@ -1490,7 +1536,7 @@ async fn handle_mouse(
                 app.selection = None;
                 return;
             }
-            let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+            let areas = orbit_tui::tui::compute_leaf_areas(app.pane_tree(), pane_area);
             for (pid, rect) in &areas {
                 if mouse.column >= rect.x
                     && mouse.column < rect.x + rect.width
@@ -1504,15 +1550,38 @@ async fn handle_mouse(
                             pane_id: *pid,
                         })
                         .await;
-                    // Start selection at inner cell coords (account for border),
-                    // but only in Normal mode — scroll/command modes must not begin selections.
-                    if matches!(app.mode, InputMode::Normal) {
-                        let inner_x = rect.x + 1;
-                        let inner_y = rect.y + 1;
+
+                    // If the pane has mouse reporting enabled, forward the click
+                    // as an SGR mouse escape sequence to the PTY.
+                    let inner_x = rect.x + 1;
+                    let inner_y = rect.y + 1;
+                    let has_mouse = app
+                        .panes
+                        .get(pid)
+                        .is_some_and(|p| p.parser.grid.mouse_reporting);
+                    if has_mouse
+                        && mouse.column >= inner_x
+                        && mouse.row >= inner_y
+                        && matches!(app.mode, InputMode::Normal)
+                    {
+                        let col = mouse.column - inner_x + 1; // 1-based for SGR
+                        let row = mouse.row - inner_y + 1;
+                        // SGR mouse press: \x1b[<0;col;rowM
+                        let seq = format!("\x1b[<0;{col};{row}M");
+                        let _ = writer
+                            .send(ClientMessage::PaneInput {
+                                tab_id: app.active_tab_id,
+                                pane_id: *pid,
+                                data: seq.into_bytes(),
+                            })
+                            .await;
+                        app.selection = None;
+                    } else if matches!(app.mode, InputMode::Normal) {
+                        // Start selection at inner cell coords (account for border)
                         if mouse.column >= inner_x && mouse.row >= inner_y {
                             let col = mouse.column - inner_x;
                             let row = mouse.row - inner_y;
-                            app.selection = Some(crate::app::Selection {
+                            app.selection = Some(orbit_tui::app::Selection {
                                 pane_id: *pid,
                                 start: (col, row),
                                 end: (col, row),
@@ -1549,16 +1618,20 @@ async fn handle_mouse(
             } else if app.sidebar_visible && mouse.column < sidebar_w {
                 if mouse.row >= 2 {
                     let mut y: u16 = 2;
-                    let mut on_card = false;
-                    for _ in &app.spaces {
+                    let mut clicked_space: Option<orbit_protocol::SpaceId> = None;
+                    for space in &app.spaces {
                         if mouse.row >= y && mouse.row < y + 4 {
-                            on_card = true;
+                            clicked_space = Some(space.space_id);
                             break;
                         }
                         y += 4;
                     }
-                    if on_card {
-                        app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Space);
+                    if let Some(space_id) = clicked_space {
+                        app.open_context_menu(
+                            mouse.column,
+                            mouse.row,
+                            ContextMenuTarget::Space(space_id),
+                        );
                     } else {
                         app.open_context_menu(mouse.column, mouse.row, ContextMenuTarget::Sidebar);
                     }
@@ -1572,7 +1645,7 @@ async fn handle_mouse(
                     width: term_w.saturating_sub(sidebar_w + agent_w),
                     height: term_h.saturating_sub(3),
                 };
-                let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+                let areas = orbit_tui::tui::compute_leaf_areas(app.pane_tree(), pane_area);
                 let mut found_pane = None;
                 for (pid, rect) in &areas {
                     if mouse.column >= rect.x
@@ -1628,6 +1701,38 @@ async fn handle_mouse(
                 app.needs_redraw = true;
                 return;
             }
+            // Forward mouse drag to PTY if mouse reporting is active
+            if app.drag_split.is_none() && app.drag_tab.is_none() {
+                let has_mouse = app
+                    .panes
+                    .get(&app.active_pane)
+                    .is_some_and(|p| p.parser.grid.mouse_reporting);
+                if has_mouse {
+                    let pane_area = content_area(term_size, app);
+                    let areas = orbit_tui::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+                    for (pid, rect) in &areas {
+                        if *pid == app.active_pane
+                            && mouse.column > rect.x
+                            && mouse.row > rect.y
+                            && mouse.column < rect.x + rect.width
+                            && mouse.row < rect.y + rect.height
+                        {
+                            let col = mouse.column - rect.x; // 1-based
+                            let row = mouse.row - rect.y;
+                            // SGR mouse drag: \x1b[<32;col;rowM (button 0 + 32 = motion)
+                            let seq = format!("\x1b[<32;{col};{row}M");
+                            let _ = writer
+                                .send(ClientMessage::PaneInput {
+                                    tab_id: app.active_tab_id,
+                                    pane_id: *pid,
+                                    data: seq.into_bytes(),
+                                })
+                                .await;
+                            return;
+                        }
+                    }
+                }
+            }
             let drag_info = app
                 .selection
                 .as_ref()
@@ -1635,7 +1740,7 @@ async fn handle_mouse(
                 .map(|s| s.pane_id);
             if let Some(sel_pane_id) = drag_info {
                 let pane_area = content_area(term_size, app);
-                let areas = crate::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+                let areas = orbit_tui::tui::compute_leaf_areas(app.pane_tree(), pane_area);
                 for (pid, rect) in &areas {
                     if *pid == sel_pane_id {
                         let inner_x = rect.x + 1;
@@ -1660,6 +1765,38 @@ async fn handle_mouse(
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {
+            // Forward mouse release to PTY if mouse reporting is active
+            if app.drag_split.is_none() && app.drag_tab.is_none() {
+                let pane_area = content_area(term_size, app);
+                let areas = orbit_tui::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+                for (pid, rect) in &areas {
+                    if *pid == app.active_pane
+                        && mouse.column > rect.x
+                        && mouse.row > rect.y
+                        && mouse.column < rect.x + rect.width
+                        && mouse.row < rect.y + rect.height
+                    {
+                        let has_mouse = app
+                            .panes
+                            .get(pid)
+                            .is_some_and(|p| p.parser.grid.mouse_reporting);
+                        if has_mouse {
+                            let col = mouse.column - rect.x; // 1-based
+                            let row = mouse.row - rect.y;
+                            // SGR mouse release: \x1b[<0;col;rowm (lowercase m)
+                            let seq = format!("\x1b[<0;{col};{row}m");
+                            let _ = writer
+                                .send(ClientMessage::PaneInput {
+                                    tab_id: app.active_tab_id,
+                                    pane_id: *pid,
+                                    data: seq.into_bytes(),
+                                })
+                                .await;
+                        }
+                        break;
+                    }
+                }
+            }
             if let Some((first_pane, second_pane, _dir, _)) = app.drag_split.take() {
                 let pane_area = content_area(term_size, app);
                 if pane_area.width > 0 && pane_area.height > 0 {
@@ -1840,7 +1977,7 @@ async fn handle_mouse(
                 } {
                     Some(AgentHover::EclipseRespond)
                 } else {
-                    let base_row = crate::tui::widgets::agent_monitor::card_start_row(
+                    let base_row = orbit_tui::tui::widgets::agent_monitor::card_start_row(
                         0,
                         app.agent_scroll_offset,
                         any_blocked,

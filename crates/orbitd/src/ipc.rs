@@ -62,6 +62,16 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
     )
     .await?;
 
+    // Nudge all PTY children with SIGWINCH so idle TUI apps (Claude Code, vim,
+    // yazi) redraw and emit fresh output. Without this, a frozen cursor_visible=false
+    // snapshot from the Welcome state never gets corrected until the user types.
+    // Small delay lets the client process Welcome before the flood of PaneOutput.
+    let sm = Arc::clone(&space_manager);
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        sm.nudge_all_spaces().await;
+    });
+
     let mut rx = space_manager.event_bus.subscribe();
 
     loop {
@@ -136,6 +146,11 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
                     ClientMessage::SwitchSpace { space_id } => {
                         if let Err(e) = space_manager.switch_space(space_id).await {
                             tracing::warn!("switch_space: {e:#}");
+                        }
+                    }
+                    ClientMessage::CloseSpace { space_id } => {
+                        if let Err(e) = space_manager.close_space(space_id).await {
+                            tracing::warn!("close_space: {e:#}");
                         }
                     }
                     ClientMessage::AgentAbort { agent_id } => {

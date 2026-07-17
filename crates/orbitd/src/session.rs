@@ -163,7 +163,7 @@ impl SessionState {
     ) -> anyhow::Result<Self> {
         let pane_id = PaneId(next_pane_id.fetch_add(1, Ordering::Relaxed));
         let tab_id = TabId(next_tab_id.fetch_add(1, Ordering::Relaxed));
-        let tab_name = format!("tab{}", tab_id.0);
+        let tab_name = "tab0".to_string();
 
         let handles = pty::spawn_pty(pane_id, &shell, &cwd, cols, rows, event_bus.clone()).await?;
 
@@ -289,7 +289,7 @@ impl SessionState {
             order.retain(|&id| id != tab_id);
             let mut active = self.active_tab.write().await;
             if *active == tab_id {
-                *active = order.first().copied().unwrap_or(TabId(0));
+                *active = order.first().copied().unwrap_or(TabId(u32::MAX));
             }
         }
 
@@ -398,7 +398,7 @@ impl SessionState {
                     .await
                     .first()
                     .copied()
-                    .unwrap_or(TabId(0));
+                    .unwrap_or(TabId(u32::MAX));
             }
         }
 
@@ -486,6 +486,27 @@ impl SessionState {
         }
     }
 
+    /// Send SIGWINCH to all PTY children by re-issuing resize at the current size.
+    /// Called on client connect so that idle TUI apps (Claude Code, vim, yazi) redraw
+    /// and emit fresh output — including correct cursor_visible state.
+    pub async fn nudge_all_panes(&self) {
+        let panes = self.panes.read().await;
+        for entry in panes.values() {
+            let (cols, rows) = {
+                let parser = entry.vt_parser.lock().unwrap();
+                (parser.grid.cols, parser.grid.rows)
+            };
+            if let Ok(master) = entry.master.lock() {
+                let _ = master.resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
+        }
+    }
+
     pub async fn focus_pane(&self, tab_id: TabId, pane_id: PaneId) {
         {
             let mut tabs = self.tabs.write().await;
@@ -550,6 +571,9 @@ impl SessionState {
                             cells: grid.cells.clone(),
                             cursor_x: grid.cursor_x,
                             cursor_y: grid.cursor_y,
+                            cursor_visible: grid.cursor_visible,
+                            mouse_reporting: grid.mouse_reporting,
+                            mouse_sgr: grid.mouse_sgr,
                         },
                     });
                 }
@@ -670,8 +694,6 @@ impl SpaceManager {
             .await?,
         );
 
-        let space_info = session.collect_space_info().await;
-
         {
             let mut spaces = self.spaces.write().await;
             spaces.insert(space_id, session);
@@ -681,9 +703,56 @@ impl SpaceManager {
             order.push(space_id);
         }
 
+        let space_info = {
+            let spaces = self.spaces.read().await;
+            let session = spaces.get(&space_id).unwrap();
+            session.collect_space_info().await
+        };
         let _ = self.event_bus.send(ServerEvent::SpaceCreated(space_info));
 
+        {
+            let mut active = self.active_space.write().await;
+            *active = space_id;
+        }
+
+        let session = self.active_session().await;
+        let info = session.collect_space_info().await;
+        let _ = self.event_bus.send(ServerEvent::SpaceUpdated(info));
+
         Ok(space_id)
+    }
+
+    pub async fn close_space(&self, space_id: SpaceId) -> anyhow::Result<()> {
+        let session = {
+            let mut spaces = self.spaces.write().await;
+            spaces.remove(&space_id)
+        };
+        if session.is_none() {
+            anyhow::bail!("space not found: {:?}", space_id);
+        }
+        // Kill all PTYs in the removed session
+        if let Some(sess) = session {
+            let panes = sess.panes.write().await;
+            for entry in panes.values() {
+                if let Ok(mut child) = entry.child.lock() {
+                    let _ = child.kill();
+                }
+            }
+        }
+        {
+            let mut order = self.space_order.write().await;
+            order.retain(|&id| id != space_id);
+        }
+        // If this was the active space, switch to the first remaining one
+        {
+            let mut active = self.active_space.write().await;
+            if *active == space_id {
+                let order = self.space_order.read().await;
+                *active = order.first().copied().unwrap_or(SpaceId(u32::MAX));
+            }
+        }
+        let _ = self.event_bus.send(ServerEvent::SpaceClosed(space_id));
+        Ok(())
     }
 
     pub async fn switch_space(&self, space_id: SpaceId) -> anyhow::Result<()> {
@@ -701,6 +770,13 @@ impl SpaceManager {
         let info = session.collect_space_info().await;
         let _ = self.event_bus.send(ServerEvent::SpaceUpdated(info));
         Ok(())
+    }
+
+    pub async fn nudge_all_spaces(&self) {
+        let spaces = self.spaces.read().await;
+        for session in spaces.values() {
+            session.nudge_all_panes().await;
+        }
     }
 
     pub async fn collect_full_state(&self) -> FullState {

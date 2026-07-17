@@ -222,9 +222,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let mut spans = vec![
                 Span::styled(
                     if is_selected { ">" } else { " " },
-                    Style::default().fg(marker_color),
+                    Style::default().fg(marker_color).bg(bg),
                 ),
-                Span::raw(" "),
+                Span::styled(" ", Style::default().bg(bg)),
                 Span::styled(cmd.label, Style::default().fg(fg).bg(bg)),
             ];
 
@@ -232,14 +232,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 let pad = inner
                     .width
                     .saturating_sub(cmd.label.len() as u16 + cmd.shortcut.len() as u16 + 6);
-                spans.push(Span::raw(" ".repeat(pad as usize)));
+                spans.push(Span::styled(
+                    " ".repeat(pad as usize),
+                    Style::default().bg(bg),
+                ));
                 spans.push(Span::styled(
                     cmd.shortcut,
-                    Style::default().fg(accent()).bg(bg_tertiary()),
+                    Style::default().fg(accent()).bg(bg),
                 ));
             }
 
-            let line = Line::from(spans);
+            let line = Line::from(spans).style(Style::default().bg(bg));
             frame.render_widget(
                 line,
                 Rect {

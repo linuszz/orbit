@@ -7,6 +7,7 @@ members = [
     "crates/orbit-core",
     # "crates/orbit-plugin",  # Phase 4 (Mars): WASM plugin runtime. Uncomment when activating.
 ]
+exclude = ["tools"]
 
 [workspace.package]
 version = "0.1.0"
@@ -38,6 +39,7 @@ thiserror = "1"
 # Misc
 regex = "1"
 futures = "0.3"
+unicode-width = "0.2"
 
 # Logging
 tracing = "0.1"

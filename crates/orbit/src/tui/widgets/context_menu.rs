@@ -43,6 +43,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
         for (i, item) in menu.items.iter().enumerate() {
             let row_y = menu_area.y + 1 + i as u16;
+            // Stop rendering if we've reached the bottom border
+            if row_y + 1 >= menu_area.y + menu_area.height {
+                break;
+            }
             match item {
                 ContextMenuItem::Action {
                     label, shortcut, ..
@@ -68,11 +72,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                     if !shortcut.is_empty() {
                         let pad = (menu_area.width as usize)
                             .saturating_sub(label.len() + shortcut.len() + 4);
-                        spans.push(Span::raw(" ".repeat(pad)));
+                        spans.push(Span::styled(" ".repeat(pad), Style::default().bg(bg)));
                         spans.push(Span::styled(shortcut.clone(), shortcut_style));
                     }
 
-                    let line = Line::from(spans);
+                    let line = Line::from(spans).style(Style::default().bg(bg));
                     frame.render_widget(
                         line,
                         Rect {

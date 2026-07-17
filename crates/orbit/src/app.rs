@@ -130,17 +130,18 @@ pub struct CommandDef {
 }
 
 pub static COMMANDS: &[CommandDef] = &[
+    // tmux: % = split horizontal (left|right), " = split vertical (top/bottom)
     CommandDef {
         id: "split_h",
         label: "Split Horizontal",
         group: "Pane",
-        shortcut: "h",
+        shortcut: "%",
     },
     CommandDef {
         id: "split_v",
         label: "Split Vertical",
         group: "Pane",
-        shortcut: "v",
+        shortcut: "\"",
     },
     CommandDef {
         id: "close_pane",
@@ -149,29 +150,50 @@ pub static COMMANDS: &[CommandDef] = &[
         shortcut: "x",
     },
     CommandDef {
+        id: "cycle_pane",
+        label: "Cycle Pane Focus",
+        group: "Pane",
+        shortcut: "o",
+    },
+    CommandDef {
+        id: "zoom_pane",
+        label: "Zoom Pane",
+        group: "Pane",
+        shortcut: "z",
+    },
+    CommandDef {
         id: "scroll_mode",
-        label: "Enter Scroll Mode",
+        label: "Enter Copy/Scroll Mode",
         group: "Pane",
         shortcut: "[",
     },
+    // tmux: c = new window, n/p = next/prev, l = last
     CommandDef {
         id: "new_tab",
-        label: "New Tab",
-        group: "Tab",
+        label: "New Window",
+        group: "Window",
         shortcut: "c",
     },
     CommandDef {
         id: "next_tab",
-        label: "Next Tab",
-        group: "Tab",
+        label: "Next Window",
+        group: "Window",
         shortcut: "n",
     },
     CommandDef {
         id: "prev_tab",
-        label: "Previous Tab",
-        group: "Tab",
+        label: "Previous Window",
+        group: "Window",
         shortcut: "p",
     },
+    // tmux: d = detach
+    CommandDef {
+        id: "detach",
+        label: "Detach Session",
+        group: "Session",
+        shortcut: "d",
+    },
+    // Orbit extensions (not in tmux but useful)
     CommandDef {
         id: "toggle_sidebar",
         label: "Toggle Sidebar",
@@ -183,12 +205,6 @@ pub static COMMANDS: &[CommandDef] = &[
         label: "Toggle Agent Monitor",
         group: "View",
         shortcut: "a",
-    },
-    CommandDef {
-        id: "detach",
-        label: "Detach Session",
-        group: "Session",
-        shortcut: "d",
     },
     CommandDef {
         id: "toggle_theme",
@@ -253,6 +269,12 @@ impl PaneState {
         self.parser.grid.cells = grid.cells.clone();
         self.parser.grid.cursor_x = grid.cursor_x.min(grid.cols.saturating_sub(1));
         self.parser.grid.cursor_y = grid.cursor_y.min(grid.rows.saturating_sub(1));
+        // Snapshot cursor_visible=false is unreliable: TUI apps hide the cursor during every
+        // render cycle, so the snapshot often captures a mid-render state. Assume visible until
+        // a live PaneOutput delivers ESC[?25l explicitly.
+        self.parser.grid.cursor_visible = true;
+        self.parser.grid.mouse_reporting = grid.mouse_reporting;
+        self.parser.grid.mouse_sgr = grid.mouse_sgr;
         self.parser.grid.scroll_top = 0;
         self.parser.grid.scroll_bottom = grid.rows.saturating_sub(1);
         self.parser.reset_parser();
@@ -325,7 +347,7 @@ pub struct App {
 #[derive(Debug, Clone)]
 pub enum ContextMenuTarget {
     Pane(PaneId),
-    Space,
+    Space(SpaceId),
     Sidebar,
     Tab(TabId),
 }
@@ -369,7 +391,11 @@ impl App {
             .position(|s| s.id == state.active_space)
             .unwrap_or(0);
 
-        let space = state.spaces.first();
+        let space = state
+            .spaces
+            .iter()
+            .find(|s| s.id == state.active_space)
+            .or_else(|| state.spaces.first());
         let mut panes = HashMap::new();
         let mut tabs = Vec::new();
         let mut active_tab_idx = 0;
@@ -382,6 +408,10 @@ impl App {
                 ps.parser.grid.cells = pane.cell_grid.cells.clone();
                 ps.parser.grid.cursor_x = pane.cell_grid.cursor_x;
                 ps.parser.grid.cursor_y = pane.cell_grid.cursor_y;
+                // See sync_from_server: snapshot cursor_visible=false is unreliable.
+                ps.parser.grid.cursor_visible = true;
+                ps.parser.grid.mouse_reporting = pane.cell_grid.mouse_reporting;
+                ps.parser.grid.mouse_sgr = pane.cell_grid.mouse_sgr;
                 ps.parser.grid.resize(cols, rows);
                 panes.insert(pane.id, ps);
             }
@@ -621,7 +651,7 @@ impl App {
                 }
                 items
             }
-            ContextMenuTarget::Space => vec![
+            ContextMenuTarget::Space(_space_id) => vec![
                 ContextMenuItem::Action {
                     label: "Rename".into(),
                     shortcut: "r".into(),
@@ -682,7 +712,12 @@ impl App {
     pub fn handle_server_event(&mut self, event: &ServerEvent) {
         match event {
             ServerEvent::Welcome { state, .. } => {
-                if let Some(s) = state.spaces.first() {
+                let active_space = state
+                    .spaces
+                    .iter()
+                    .find(|s| s.id == state.active_space)
+                    .or_else(|| state.spaces.first());
+                if let Some(s) = active_space {
                     for pane in &s.panes {
                         if let Some(existing) = self.panes.get_mut(&pane.id) {
                             existing.sync_from_server(&pane.cell_grid);
@@ -773,8 +808,17 @@ impl App {
 
                 for pane in &info.panes {
                     if old_ids.contains(&pane.id) {
+                        // For existing panes the client VT is authoritative for cell content
+                        // and cursor state (updated live via PaneOutput). Only sync grid
+                        // dimensions so a resize is reflected without clobbering VT state.
                         if let Some(existing) = self.panes.get_mut(&pane.id) {
-                            existing.sync_from_server(&pane.cell_grid);
+                            let new_cols = pane.cell_grid.cols.max(1);
+                            let new_rows = pane.cell_grid.rows.max(1);
+                            if existing.parser.grid.cols != new_cols
+                                || existing.parser.grid.rows != new_rows
+                            {
+                                existing.parser.grid.resize(new_cols, new_rows);
+                            }
                         }
                     } else {
                         let mut ps =
@@ -850,11 +894,18 @@ impl App {
                     tab_count: info.tabs.len(),
                     pane_count: info.panes.len(),
                 });
+                self.active_space_idx = self.spaces.len() - 1;
                 self.needs_redraw = true;
             }
-            ServerEvent::SpaceClosed(_) => {
-                eprintln!("Exiting: SpaceClosed received");
-                self.should_quit = true;
+            ServerEvent::SpaceClosed(closed_id) => {
+                // Remove the closed space from the sidebar list.
+                self.spaces.retain(|s| s.space_id != *closed_id);
+                // Only quit if the active space was closed and there are no spaces left.
+                if self.spaces.is_empty() {
+                    self.should_quit = true;
+                } else if self.active_space_idx >= self.spaces.len() {
+                    self.active_space_idx = self.spaces.len().saturating_sub(1);
+                }
                 self.needs_redraw = true;
             }
             ServerEvent::AgentCreated(info) => {
@@ -928,16 +979,67 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_protocol::{
+        AgentDetail, AgentInfo, AgentStatus, CellGrid, FullState, PaneInfo, PaneLayout, SpaceInfo,
+        TabInfo,
+    };
+
+    /// Helper: build a minimal FullState for constructing App instances in tests.
+    fn minimal_state() -> FullState {
+        FullState {
+            spaces: vec![SpaceInfo {
+                id: SpaceId(1),
+                name: "test".to_string(),
+                path: "/tmp/test".to_string(),
+                tabs: vec![TabInfo {
+                    id: TabId(1),
+                    name: "dev".to_string(),
+                    layout: PaneLayout::Leaf(PaneId(1)),
+                    active_pane: PaneId(1),
+                }],
+                active_tab: TabId(1),
+                panes: vec![PaneInfo {
+                    id: PaneId(1),
+                    tab_id: TabId(1),
+                    title: String::new(),
+                    cwd: "/tmp".to_string(),
+                    cell_grid: CellGrid::new(80, 24),
+                }],
+            }],
+            active_space: SpaceId(1),
+            agents: vec![],
+        }
+    }
+
+    fn make_agent(id: u32, status: AgentStatus) -> AgentInfo {
+        AgentInfo {
+            id: AgentId(id),
+            name: format!("agent-{id}"),
+            space_id: SpaceId(1),
+            model: "claude".to_string(),
+            status,
+            pane_id: Some(PaneId(1)),
+            detail: Some(AgentDetail {
+                task: None,
+                block_msg: None,
+                progress: None,
+                duration_s: 0,
+            }),
+        }
+    }
 
     #[test]
     fn sync_from_server_different_dimensions() {
         let mut pane = PaneState::new(80, 24);
-        let server_grid = orbit_protocol::CellGrid {
+        let server_grid = CellGrid {
             cols: 120,
             rows: 30,
             cells: vec![orbit_protocol::Cell::default(); 120 * 30],
             cursor_x: 10,
             cursor_y: 5,
+            cursor_visible: true,
+            mouse_reporting: false,
+            mouse_sgr: false,
         };
         pane.sync_from_server(&server_grid);
         assert_eq!(pane.parser.grid.cols, 120);
@@ -945,5 +1047,333 @@ mod tests {
         assert_eq!(pane.parser.grid.cells.len(), 120 * 30);
         assert_eq!(pane.parser.grid.cursor_x, 10);
         assert_eq!(pane.parser.grid.cursor_y, 5);
+    }
+
+    #[test]
+    fn from_welcome_builds_correct_state() {
+        let state = minimal_state();
+        let app = App::from_welcome(&state, 80, 24);
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.tabs[0].name, "dev");
+        assert_eq!(app.active_pane, PaneId(1));
+        assert_eq!(app.active_tab_id, TabId(1));
+        assert_eq!(app.space_name, "test");
+        assert!(app.panes.contains_key(&PaneId(1)));
+        assert_eq!(app.mode, InputMode::Normal);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn sort_agents_priority_order() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        app.agents = vec![
+            make_agent(1, AgentStatus::Done),
+            make_agent(2, AgentStatus::Working),
+            make_agent(3, AgentStatus::Blocked),
+            make_agent(4, AgentStatus::Error),
+            make_agent(5, AgentStatus::Idle),
+        ];
+        app.sort_agents();
+        let order: Vec<AgentId> = app.agents.iter().map(|a| a.id).collect();
+        // Blocked(0) < Working(1) < Error(2) < Idle(3) < Done(4)
+        assert_eq!(
+            order,
+            vec![AgentId(3), AgentId(2), AgentId(4), AgentId(5), AgentId(1)]
+        );
+    }
+
+    #[test]
+    fn sort_agents_preserves_keyboard_selection() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        app.agents = vec![
+            make_agent(1, AgentStatus::Idle),
+            make_agent(2, AgentStatus::Working),
+            make_agent(3, AgentStatus::Done),
+        ];
+        // Select agent 2 (idx=1 before sort)
+        app.mode = InputMode::AgentPanel { selected: 1 };
+        app.sort_agents();
+        // After sort, Working(agent 2) should be at idx=0
+        if let InputMode::AgentPanel { selected } = app.mode {
+            assert_eq!(app.agents[selected].id, AgentId(2));
+        } else {
+            panic!("Expected AgentPanel mode");
+        }
+    }
+
+    #[test]
+    fn has_active_agents_detection() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        assert!(!app.has_active_agents());
+
+        app.agents.push(make_agent(1, AgentStatus::Idle));
+        assert!(!app.has_active_agents());
+
+        app.agents.push(make_agent(2, AgentStatus::Working));
+        assert!(app.has_active_agents());
+    }
+
+    #[test]
+    fn next_prev_tab_cycles() {
+        let mut state = minimal_state();
+        state.spaces[0].tabs.push(TabInfo {
+            id: TabId(2),
+            name: "build".to_string(),
+            layout: PaneLayout::Leaf(PaneId(2)),
+            active_pane: PaneId(2),
+        });
+        state.spaces[0].panes.push(PaneInfo {
+            id: PaneId(2),
+            tab_id: TabId(2),
+            title: String::new(),
+            cwd: "/tmp".to_string(),
+            cell_grid: CellGrid::new(80, 24),
+        });
+        let mut app = App::from_welcome(&state, 80, 24);
+        assert_eq!(app.active_tab, 0);
+        assert_eq!(app.active_tab_id, TabId(1));
+
+        app.next_tab();
+        assert_eq!(app.active_tab, 1);
+        assert_eq!(app.active_tab_id, TabId(2));
+
+        app.next_tab();
+        assert_eq!(app.active_tab, 0); // wraps around
+
+        app.prev_tab();
+        assert_eq!(app.active_tab, 1); // wraps backward
+    }
+
+    #[test]
+    fn cycle_focus_rotates_panes() {
+        let mut state = minimal_state();
+        state.spaces[0].tabs[0].layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneLayout::Leaf(PaneId(1))),
+            second: Box::new(PaneLayout::Leaf(PaneId(2))),
+        };
+        state.spaces[0].panes.push(PaneInfo {
+            id: PaneId(2),
+            tab_id: TabId(1),
+            title: String::new(),
+            cwd: "/tmp".to_string(),
+            cell_grid: CellGrid::new(80, 24),
+        });
+        let mut app = App::from_welcome(&state, 80, 24);
+        app.active_pane = PaneId(1);
+
+        app.cycle_focus();
+        assert_eq!(app.active_pane, PaneId(2));
+
+        app.cycle_focus();
+        assert_eq!(app.active_pane, PaneId(1));
+    }
+
+    #[test]
+    fn open_close_context_menu() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        assert!(app.context_menu.is_none());
+
+        app.open_context_menu(10, 5, ContextMenuTarget::Pane(PaneId(1)));
+        assert!(app.context_menu.is_some());
+        let menu = app.context_menu.as_ref().unwrap();
+        assert_eq!(menu.x, 10);
+        assert_eq!(menu.y, 5);
+        assert_eq!(menu.selected, 0);
+        // Pane context menu has at least split + close items
+        assert!(menu.items.len() >= 4);
+
+        app.close_context_menu();
+        assert!(app.context_menu.is_none());
+    }
+
+    #[test]
+    fn context_menu_tab_items() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        app.open_context_menu(0, 0, ContextMenuTarget::Tab(TabId(1)));
+        let menu = app.context_menu.as_ref().unwrap();
+        let action_ids: Vec<&str> = menu
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                ContextMenuItem::Action { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert!(action_ids.contains(&"new_tab"));
+        assert!(action_ids.contains(&"close_tab"));
+    }
+
+    #[test]
+    fn handle_agent_created_event() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        assert!(app.agents.is_empty());
+
+        let info = make_agent(10, AgentStatus::Working);
+        app.handle_server_event(&ServerEvent::AgentCreated(info));
+        assert_eq!(app.agents.len(), 1);
+        assert_eq!(app.agents[0].id, AgentId(10));
+        assert!(app.agent_panel_visible); // auto-opens
+        assert!(app.agent_start_times.contains_key(&AgentId(10)));
+    }
+
+    #[test]
+    fn handle_agent_removed_cleans_state() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        app.agents.push(make_agent(5, AgentStatus::Working));
+        app.agent_start_times.insert(AgentId(5), Instant::now());
+        app.agent_blocked_times.insert(AgentId(5), Instant::now());
+
+        app.handle_server_event(&ServerEvent::AgentRemoved(AgentId(5)));
+        assert!(app.agents.is_empty());
+        assert!(!app.agent_start_times.contains_key(&AgentId(5)));
+        assert!(!app.agent_blocked_times.contains_key(&AgentId(5)));
+    }
+
+    #[test]
+    fn handle_agent_removed_dismisses_eclipse_modal() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        app.agents.push(make_agent(7, AgentStatus::Blocked));
+        app.eclipse_modal = Some(EclipseModalState {
+            agent_id: AgentId(7),
+            agent_name: "agent-7".to_string(),
+            block_msg: "needs input".to_string(),
+            response: String::new(),
+            model: "claude".to_string(),
+            task: None,
+            progress: None,
+            cwd: None,
+            blocked_duration_s: 0,
+        });
+
+        app.handle_server_event(&ServerEvent::AgentRemoved(AgentId(7)));
+        assert!(app.eclipse_modal.is_none());
+    }
+
+    #[test]
+    fn handle_agent_status_changed_tracks_blocked_time() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        app.agents.push(make_agent(3, AgentStatus::Working));
+
+        // Transition to Blocked
+        app.handle_server_event(&ServerEvent::AgentStatusChanged {
+            agent_id: AgentId(3),
+            new_status: AgentStatus::Blocked,
+            detail: None,
+        });
+        assert!(app.agent_blocked_times.contains_key(&AgentId(3)));
+        assert_eq!(app.agents[0].status, AgentStatus::Blocked);
+
+        // Transition back to Working
+        app.handle_server_event(&ServerEvent::AgentStatusChanged {
+            agent_id: AgentId(3),
+            new_status: AgentStatus::Working,
+            detail: None,
+        });
+        assert!(!app.agent_blocked_times.contains_key(&AgentId(3)));
+    }
+
+    #[test]
+    fn handle_agent_removed_clamps_panel_selection() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        app.agents = vec![
+            make_agent(1, AgentStatus::Working),
+            make_agent(2, AgentStatus::Working),
+            make_agent(3, AgentStatus::Working),
+        ];
+        app.mode = InputMode::AgentPanel { selected: 2 };
+
+        app.handle_server_event(&ServerEvent::AgentRemoved(AgentId(3)));
+        if let InputMode::AgentPanel { selected } = app.mode {
+            assert!(selected < app.agents.len());
+        } else {
+            panic!("Expected AgentPanel mode");
+        }
+    }
+
+    #[test]
+    fn handle_space_created_event() {
+        let state = minimal_state();
+        let mut app = App::from_welcome(&state, 80, 24);
+        assert_eq!(app.spaces.len(), 1);
+
+        let new_space = SpaceInfo {
+            id: SpaceId(2),
+            name: "build".to_string(),
+            path: "/tmp/build".to_string(),
+            tabs: vec![TabInfo {
+                id: TabId(10),
+                name: "main".to_string(),
+                layout: PaneLayout::Leaf(PaneId(10)),
+                active_pane: PaneId(10),
+            }],
+            active_tab: TabId(10),
+            panes: vec![PaneInfo {
+                id: PaneId(10),
+                tab_id: TabId(10),
+                title: String::new(),
+                cwd: "/tmp/build".to_string(),
+                cell_grid: CellGrid::new(80, 24),
+            }],
+        };
+        app.handle_server_event(&ServerEvent::SpaceCreated(new_space));
+        assert_eq!(app.spaces.len(), 2);
+        assert_eq!(app.active_space_idx, 1); // auto-selects new space
+        assert_eq!(app.spaces[1].name, "build");
+    }
+
+    #[test]
+    fn pane_in_current_tab_check() {
+        let mut state = minimal_state();
+        state.spaces[0].tabs[0].layout = PaneLayout::Split {
+            direction: SplitDir::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneLayout::Leaf(PaneId(1))),
+            second: Box::new(PaneLayout::Leaf(PaneId(2))),
+        };
+        state.spaces[0].panes.push(PaneInfo {
+            id: PaneId(2),
+            tab_id: TabId(1),
+            title: String::new(),
+            cwd: "/tmp".to_string(),
+            cell_grid: CellGrid::new(80, 24),
+        });
+        let app = App::from_welcome(&state, 80, 24);
+        assert!(app.pane_in_current_tab(PaneId(1)));
+        assert!(app.pane_in_current_tab(PaneId(2)));
+        assert!(!app.pane_in_current_tab(PaneId(99)));
+    }
+
+    #[test]
+    fn settings_persistence_roundtrip() {
+        let settings = UserSettings {
+            theme: "orange".to_string(),
+            sidebar_visible: false,
+            agent_panel_visible: true,
+        };
+        let toml_str = toml::to_string(&settings).unwrap();
+        let restored: UserSettings = toml::from_str(&toml_str).unwrap();
+        assert_eq!(restored.theme, "orange");
+        assert!(!restored.sidebar_visible);
+        assert!(restored.agent_panel_visible);
+    }
+
+    #[test]
+    fn default_settings_values() {
+        let settings = UserSettings::default();
+        assert_eq!(settings.theme, "orbit");
+        assert!(settings.sidebar_visible);
+        assert!(!settings.agent_panel_visible);
     }
 }

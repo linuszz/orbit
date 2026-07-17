@@ -54,7 +54,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     for (i, tab) in app.tabs.iter().enumerate() {
         let label = format!(" {} ", tab.name);
-        let label_w = label.len() as u16 + 1;
+        let label_w = label.chars().count() as u16 + 1;
         if used_w + label_w > max_tabs_w {
             truncated = true;
             break;
@@ -94,7 +94,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(new_tab_fg).bg(bg_card()),
     ));
 
-    let used_width: u16 = spans.iter().map(|s| s.content.len() as u16).sum::<u16>();
+    let used_width: u16 = spans
+        .iter()
+        .map(|s| s.content.chars().count() as u16)
+        .sum::<u16>();
     let fill_len = area.width.saturating_sub(used_width + agent_badge_w) as usize;
     spans.push(Span::styled(
         " ".repeat(fill_len),

@@ -12,6 +12,10 @@ description = "Orbit — TUI client. Universal terminal workspace."
 name = "orbit"
 path = "src/main.rs"
 
+[lib]
+name = "orbit_tui"
+path = "src/lib.rs"
+
 [dependencies]
 tokio = { workspace = true }
 ratatui = { workspace = true }
@@ -27,3 +31,4 @@ orbit-protocol = { workspace = true }
 orbit-core = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
+unicode-width = { workspace = true }

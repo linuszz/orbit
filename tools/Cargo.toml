@@ -1,0 +1,41 @@
+[package]
+name = "orbit-tools"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "integration_test"
+path = "integration_test.rs"
+
+[[bin]]
+name = "render_preview"
+path = "render_preview.rs"
+
+[[bin]]
+name = "scenario_test"
+path = "scenario_test.rs"
+
+[[bin]]
+name = "cursor_diag"
+path = "cursor_diag.rs"
+
+[[bin]]
+name = "pane_dump"
+path = "pane_dump.rs"
+
+[[bin]]
+name = "full_dump"
+path = "full_dump.rs"
+
+[[bin]]
+name = "vt_trace"
+path = "vt_trace.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net", "time"] }
+anyhow = "1"
+interprocess = { version = "2", features = ["tokio"] }
+libc = "0.2"
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
+orbit-protocol = { path = "../crates/orbit-protocol" }
+orbit_tui = { path = "../crates/orbit", package = "orbit" }

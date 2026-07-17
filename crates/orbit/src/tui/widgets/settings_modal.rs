@@ -14,10 +14,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let modal_w = 44u16.min(area.width.saturating_sub(4));
+    let modal_w = 52u16.min(area.width.saturating_sub(4));
     let modal_h = 12u16.min(area.height.saturating_sub(4));
-    let x = area.x + (area.width - modal_w) / 2;
-    let y = area.y + (area.height - modal_h) / 2;
+    let x = area.x + area.width.saturating_sub(modal_w) / 2;
+    let y = area.y + area.height.saturating_sub(modal_h) / 2;
     let modal_area = Rect {
         x,
         y,
@@ -25,8 +25,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         height: modal_h,
     };
 
-    let dim = Block::default().style(Style::default().bg(ratatui::style::Color::Rgb(10, 10, 14)));
-    frame.render_widget(dim, area);
     frame.render_widget(Clear, modal_area);
 
     let block = Block::default()
@@ -46,21 +44,29 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         height: modal_area.height.saturating_sub(2),
     };
 
-    let theme_display = if app.theme_name == "orbit" {
-        "Orbit"
-    } else {
-        "Tokyo Night"
-    };
+    let theme_display: String = app
+        .theme_name
+        .split('-')
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
     let sidebar_display = if app.sidebar_visible { "On" } else { "Off" };
     let agent_display = if app.agent_panel_visible { "On" } else { "Off" };
 
-    let rows: Vec<(&str, &str)> = vec![
+    let rows: Vec<(&str, String)> = vec![
         ("Theme", theme_display),
-        ("Sidebar", sidebar_display),
-        ("Agent Panel", agent_display),
+        ("Sidebar", sidebar_display.to_string()),
+        ("Agent Panel", agent_display.to_string()),
     ];
 
     for (i, (label, value)) in rows.iter().enumerate() {
+        let value = value.as_str();
         let is_selected = i == app.settings_selected;
         let row_y = inner.y + i as u16 + 1;
         let bg = if is_selected {
@@ -79,20 +85,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Span::raw("  ")
         };
-        let val_width = inner.width.saturating_sub(label.len() as u16 + 6);
+        // Layout: "  " marker(2) + label + gap + "[value]" flush right
+        // bracket_str width = value.len() + 2, total fixed = 2 + label + 2 + value + 2 = label+value+6
+        let bracket_str = format!("[{}]", value);
+        let used = 2 + label.len() as u16 + bracket_str.len() as u16;
+        let gap = inner.width.saturating_sub(used);
         let line = Line::from(vec![
             marker,
             Span::styled(*label, Style::default().fg(fg_label).bg(bg)),
-            Span::raw(" ".repeat(val_width as usize)),
-            Span::styled(format!("[{}]", value), Style::default().fg(fg_value).bg(bg)),
-            Span::raw(
-                " ".repeat(
-                    inner
-                        .width
-                        .saturating_sub(label.len() as u16 + val_width + value.len() as u16 + 6)
-                        as usize,
-                ),
-            ),
+            Span::styled(" ".repeat(gap as usize), Style::default().bg(bg)),
+            Span::styled(bracket_str, Style::default().fg(fg_value).bg(bg)),
         ]);
         frame.render_widget(
             line,
