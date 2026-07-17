@@ -1,0 +1,148 @@
+name: Build apt repository
+
+on:
+  repository_dispatch:
+    types: [new-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v0.2.0)'
+        required: true
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          V="${{ github.event.client_payload.version || github.event.inputs.version }}"
+          echo "version=${V#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Download Linux binary
+        run: |
+          curl -sL "https://github.com/linuszz/orbit/releases/download/${{ steps.ver.outputs.tag }}/orbit-linux-x86_64.tar.gz" \
+            | tar xz
+
+      - name: Build .deb package
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          # Standard Debian package directory layout
+          PKG="orbit_${VER}_amd64"
+          mkdir -p "${PKG}/DEBIAN"
+          mkdir -p "${PKG}/usr/bin"
+          cp orbit "${PKG}/usr/bin/orbit"
+          chmod 755 "${PKG}/usr/bin/orbit"
+
+          cat > "${PKG}/DEBIAN/control" <<EOF
+          Package: orbit
+          Version: ${VER}
+          Architecture: amd64
+          Maintainer: Linus <linus@orbit.sh>
+          Depends: libc6 (>= 2.17)
+          Section: utils
+          Priority: optional
+          Homepage: https://github.com/linuszz/orbit
+          Description: Universal terminal workspace
+           Orbit is a terminal multiplexer with first-class AI agent runtime.
+           Run orbit to start the TUI; sessions persist after detach.
+          EOF
+
+          # Strip leading whitespace from heredoc
+          sed -i 's/^          //' "${PKG}/DEBIAN/control"
+
+          cat > "${PKG}/DEBIAN/postinst" <<'EOF'
+          #!/bin/sh
+          set -e
+          if [ "$1" = "configure" ]; then
+            mkdir -p "${HOME}/.orbit"
+          fi
+          EOF
+          chmod 755 "${PKG}/DEBIAN/postinst"
+
+          dpkg-deb --build --root-owner-group "${PKG}"
+          mv "${PKG}.deb" "orbit_${VER}_amd64.deb"
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.APT_GPG_PRIVATE_KEY }}" | gpg --import
+          gpg --list-secret-keys
+
+      - name: Build apt repository structure
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p repo/pool/main
+          cp "orbit_${VER}_amd64.deb" repo/pool/main/
+
+          mkdir -p repo/dists/stable/main/binary-amd64
+
+          # Packages index
+          cd repo
+          dpkg-scanpackages --arch amd64 pool/main /dev/null > dists/stable/main/binary-amd64/Packages
+          gzip -k dists/stable/main/binary-amd64/Packages
+
+          # Release file
+          cat > dists/stable/Release <<EOF
+          Origin: Orbit
+          Label: Orbit
+          Suite: stable
+          Codename: stable
+          Architectures: amd64
+          Components: main
+          Description: Orbit terminal workspace apt repository
+          EOF
+
+          apt-ftparchive release dists/stable > dists/stable/Release.tmp
+          # Merge our header with generated hashes
+          head -8 dists/stable/Release > dists/stable/Release.final
+          tail -n +1 dists/stable/Release.tmp >> dists/stable/Release.final
+          mv dists/stable/Release.final dists/stable/Release
+
+          # Sign
+          gpg --default-key "linus@orbit.sh" \
+              --clearsign --output dists/stable/InRelease dists/stable/Release
+          gpg --default-key "linus@orbit.sh" \
+              --armor --detach-sign --output dists/stable/Release.gpg dists/stable/Release
+
+          cd ..
+
+      - name: Export GPG public key
+        run: |
+          gpg --armor --export "linus@orbit.sh" > repo/orbit.gpg.pub
+
+      - name: Add install instructions
+        run: |
+          cat > repo/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head><title>Orbit apt repository</title></head>
+          <body>
+          <h1>Orbit apt repository</h1>
+          <pre>
+          # Install
+          curl -fsSL https://apt.orbit.sh/orbit.gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/orbit.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/orbit.gpg] https://apt.orbit.sh stable main" \
+            | sudo tee /etc/apt/sources.list.d/orbit.list
+          sudo apt update && sudo apt install orbit
+          </pre>
+          </body>
+          </html>
+          EOF
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./repo
+          force_orphan: true
+          cname: apt.orbit.sh

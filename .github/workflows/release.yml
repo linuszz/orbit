@@ -87,10 +87,10 @@ jobs:
           event-type: new-release
           client-payload: '{"version": "${{ github.ref_name }}"}'
 
-      - name: Trigger apt repository update
+      - name: Trigger apt repository build
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.TAP_GITHUB_TOKEN }}
-          repository: linuszz/apt-orbit
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: linuszz/orbit
           event-type: new-release
           client-payload: '{"version": "${{ github.ref_name }}"}'
