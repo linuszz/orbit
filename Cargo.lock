@@ -1862,6 +1862,7 @@ dependencies = [
  "libc",
  "orbit-core",
  "orbit-protocol",
+ "orbitd",
  "ratatui",
  "russh",
  "serde",
@@ -1890,6 +1891,7 @@ name = "orbit-protocol"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "libc",
  "serde",
  "thiserror 1.0.69",
 ]

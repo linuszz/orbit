@@ -29,6 +29,7 @@ futures = { workspace = true }
 libc = { workspace = true }
 orbit-protocol = { workspace = true }
 orbit-core = { workspace = true }
+orbitd = { path = "../orbitd" }
 toml = { workspace = true }
 serde = { workspace = true }
 unicode-width = { workspace = true }

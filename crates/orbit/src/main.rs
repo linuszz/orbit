@@ -24,8 +24,60 @@ fn parse_remote_arg() -> Option<String> {
     None
 }
 
+// Attempt to connect to local orbitd. On failure, spawn `orbit daemon` as a
+// background process, wait briefly for it to bind the socket, then retry once.
+async fn connect_local_with_autostart() -> Result<(crate::ipc::IpcWriter, crate::ipc::IpcReader, orbit_protocol::FullState)> {
+    if let Ok((ipc, state)) = IpcClient::connect().await {
+        let (w, r) = ipc.into_split();
+        return Ok((w, r, state));
+    }
+
+    debug!("orbitd not running, auto-starting daemon...");
+    let exe = std::env::current_exe().context("cannot resolve orbit binary path")?;
+    std::process::Command::new(&exe)
+        .arg("daemon")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("failed to spawn orbit daemon")?;
+
+    // Give the daemon time to bind the socket (up to 2 s in 100 ms steps).
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if let Ok((ipc, state)) = IpcClient::connect().await {
+            let (w, r) = ipc.into_split();
+            return Ok((w, r, state));
+        }
+    }
+
+    // Final attempt — return a proper error if it still hasn't come up.
+    let (ipc, state) = IpcClient::connect()
+        .await
+        .context("orbitd did not start in time — check logs with ORBIT_LOG_LEVEL=debug")?;
+    let (w, r) = ipc.into_split();
+    Ok((w, r, state))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    // `orbit daemon` — run the daemon in the foreground (used by servers and
+    // by the auto-start path above when it forks itself).
+    if args.get(1).map(|s| s.as_str()) == Some("daemon") {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_env("ORBIT_LOG_LEVEL")
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .with_ansi(false)
+            .with_file(true)
+            .with_line_number(true)
+            .init();
+        return orbitd::run().await;
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("ORBIT_LOG_LEVEL")
@@ -40,11 +92,7 @@ async fn main() -> Result<()> {
         ssh::connect_remote(&spec).await?
     } else {
         debug!("connecting to local orbitd...");
-        let (ipc, state) = IpcClient::connect()
-            .await
-            .context("failed to connect to orbitd — is the daemon running?")?;
-        let (w, r) = ipc.into_split();
-        (w, r, state)
+        connect_local_with_autostart().await?
     };
 
     debug!("setting up terminal...");

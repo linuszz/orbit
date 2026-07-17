@@ -5,24 +5,7 @@ use orbit_protocol::{Capabilities, ClientMessage, FullState, ServerEvent, PROTOC
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf};
 use tokio::sync::mpsc;
 
-pub fn default_socket_path() -> std::path::PathBuf {
-    let uid = unsafe { libc::getuid() };
-
-    let runtime = format!("/run/user/{uid}");
-    let runtime_dir = std::path::Path::new(&runtime);
-    if runtime_dir.exists() {
-        return runtime_dir.join("orbit.sock");
-    }
-
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        let p = std::path::Path::new(&dir);
-        if p.exists() {
-            return p.join("orbit.sock");
-        }
-    }
-
-    std::env::temp_dir().join(format!("orbit-{uid}.sock"))
-}
+pub use orbit_protocol::default_socket_path;
 
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> AsyncStream for T {}

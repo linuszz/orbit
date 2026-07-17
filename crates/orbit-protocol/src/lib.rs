@@ -10,9 +10,11 @@
 pub mod encoding;
 pub mod error;
 pub mod messages;
+pub mod socket;
 pub mod types;
 
 pub use encoding::{decode_message, encode_message, MAX_MSG_BYTES};
+pub use socket::default_socket_path;
 pub use error::ProtocolError;
 pub use messages::{Capabilities, ClientMessage, ServerEvent, PROTOCOL_VERSION};
 pub use types::{

@@ -12,6 +12,10 @@ description = "Orbit daemon — session, PTY, and agent runtime server."
 name = "orbitd"
 path = "src/main.rs"
 
+[lib]
+name = "orbitd"
+path = "src/lib.rs"
+
 [features]
 default = ["sysinfo-metrics"]
 sysinfo-metrics = ["dep:sysinfo"]
