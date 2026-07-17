@@ -236,6 +236,13 @@ pub static COMMANDS: &[CommandDef] = &[
         group: "Satellite",
         shortcut: "j",
     },
+    // Phase 3: paste local clipboard image into active pane as a file path
+    CommandDef {
+        id: "paste_image",
+        label: "Paste Image from Clipboard",
+        group: "Pane",
+        shortcut: "I",
+    },
 ];
 
 pub struct PaneState {
@@ -342,6 +349,9 @@ pub struct App {
     pub theme_name: String,
     pub settings_open: bool,
     pub settings_selected: usize,
+    /// Set when orbitd acknowledges an UploadPayload with the remote path.
+    /// events.rs drains this and injects the path as PTY input.
+    pub pending_payload_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -512,6 +522,7 @@ impl App {
             theme_name: "orbit".to_string(),
             settings_open: false,
             settings_selected: 0,
+            pending_payload_path: None,
         }
     }
 
@@ -980,6 +991,10 @@ impl App {
             }
             ServerEvent::AgentMetricsUpdated { agent_id, metrics } => {
                 self.agent_metrics.insert(*agent_id, metrics.clone());
+                self.needs_redraw = true;
+            }
+            ServerEvent::PayloadReady { path } => {
+                self.pending_payload_path = Some(path.clone());
                 self.needs_redraw = true;
             }
             _ => {}

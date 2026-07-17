@@ -6,7 +6,7 @@ use futures::StreamExt;
 use orbit_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
 
-use crate::ipc::{IpcClient, IpcWriter};
+use crate::ipc::{IpcReader, IpcWriter};
 use orbit_tui::app::{AgentHover, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
 use orbit_tui::tui::{agent_panel_width, render, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
 
@@ -190,6 +190,35 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
                 let max = app.agents.len().saturating_sub(visible);
                 app.agent_scroll_offset = (app.agent_scroll_offset + 1).min(max);
             }
+        }
+        "paste_image" => {
+            let writer_clone = writer.clone();
+            tokio::spawn(async move {
+                let result = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+                    let img = arboard::Clipboard::new().ok()?.get_image().ok()?;
+                    let rgba = img.bytes.into_owned();
+                    let dyn_img =
+                        image::RgbaImage::from_raw(img.width as u32, img.height as u32, rgba)?;
+                    let mut buf = std::io::Cursor::new(Vec::new());
+                    image::DynamicImage::from(dyn_img)
+                        .write_to(&mut buf, image::ImageFormat::Png)
+                        .ok()?;
+                    let data = buf.into_inner();
+                    if data.len() > orbit_protocol::MAX_MSG_BYTES {
+                        return None;
+                    }
+                    Some(data)
+                })
+                .await;
+                if let Ok(Some(data)) = result {
+                    let _ = writer_clone
+                        .send(ClientMessage::UploadPayload {
+                            data,
+                            filename: "screenshot.png".to_string(),
+                        })
+                        .await;
+                }
+            });
         }
         "detach" => app.should_quit = true,
         "toggle_theme" => {
@@ -803,8 +832,12 @@ async fn send_pane_resizes(app: &mut App, writer: &IpcWriter, term_cols: u16, te
     }
 }
 
-pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) -> Result<()> {
-    let (writer, mut reader) = ipc.into_split();
+pub async fn run(
+    app: &mut App,
+    writer: IpcWriter,
+    mut reader: IpcReader,
+    terminal: &mut OrbitTerminal,
+) -> Result<()> {
     let mut event_stream = EventStream::new();
 
     app.needs_redraw = true;
@@ -841,7 +874,18 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
 
             event_result = reader.recv() => {
                 match event_result {
-                    Ok(event) => app.handle_server_event(&event),
+                    Ok(event) => {
+                        app.handle_server_event(&event);
+                        // Drain payload path: inject file path into active PTY.
+                        if let Some(path) = app.pending_payload_path.take() {
+                            let data = format!("{path}\n").into_bytes();
+                            let _ = writer.send(ClientMessage::PaneInput {
+                                tab_id: app.active_tab_id,
+                                pane_id: app.active_pane,
+                                data,
+                            }).await;
+                        }
+                    }
                     Err(e) => {
                         eprintln!("Exiting: server disconnected: {e:#}");
                         app.server_connected = false;
@@ -866,20 +910,55 @@ pub async fn run(app: &mut App, ipc: IpcClient, terminal: &mut OrbitTerminal) ->
                         handle_mouse(mouse, app, &writer, term_rect).await;
                     }
                     Some(Ok(Event::Paste(text))) => {
-                        // Bracketed paste: wrap in ESC[200~ / ESC[201~ so the PTY app
-                        // receives it as a paste rather than simulated keystrokes.
                         if matches!(app.mode, InputMode::Normal) {
-                            let mut data = Vec::with_capacity(text.len() + 12);
-                            data.extend_from_slice(b"\x1b[200~");
-                            data.extend_from_slice(text.as_bytes());
-                            data.extend_from_slice(b"\x1b[201~");
-                            let _ = writer
-                                .send(ClientMessage::PaneInput {
-                                    tab_id: app.active_tab_id,
-                                    pane_id: app.active_pane,
-                                    data,
-                                })
-                                .await;
+                            if text.is_empty() {
+                                // Empty paste event means clipboard has no text (likely an image).
+                                // Attempt image upload via the same path as paste_image command.
+                                let writer_clone = writer.clone();
+                                tokio::spawn(async move {
+                                    let result = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+                                        let img = arboard::Clipboard::new().ok()?.get_image().ok()?;
+                                        let rgba = img.bytes.into_owned();
+                                        let dyn_img = image::RgbaImage::from_raw(
+                                            img.width as u32,
+                                            img.height as u32,
+                                            rgba,
+                                        )?;
+                                        let mut buf = std::io::Cursor::new(Vec::new());
+                                        image::DynamicImage::from(dyn_img)
+                                            .write_to(&mut buf, image::ImageFormat::Png)
+                                            .ok()?;
+                                        let data = buf.into_inner();
+                                        if data.len() > orbit_protocol::MAX_MSG_BYTES {
+                                            return None;
+                                        }
+                                        Some(data)
+                                    })
+                                    .await;
+                                    if let Ok(Some(data)) = result {
+                                        let _ = writer_clone
+                                            .send(ClientMessage::UploadPayload {
+                                                data,
+                                                filename: "screenshot.png".to_string(),
+                                            })
+                                            .await;
+                                    }
+                                });
+                            } else {
+                                // Bracketed paste: wrap in ESC[200~ / ESC[201~ so the PTY app
+                                // receives it as a paste rather than simulated keystrokes.
+                                let mut data = Vec::with_capacity(text.len() + 12);
+                                data.extend_from_slice(b"\x1b[200~");
+                                data.extend_from_slice(text.as_bytes());
+                                data.extend_from_slice(b"\x1b[201~");
+                                let _ = writer
+                                    .send(ClientMessage::PaneInput {
+                                        tab_id: app.active_tab_id,
+                                        pane_id: app.active_pane,
+                                        data,
+                                    })
+                                    .await;
+                            }
                         }
                     }
                     Some(Err(e)) => debug!("event stream error: {e}"),

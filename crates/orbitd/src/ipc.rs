@@ -1,22 +1,22 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Result};
 use arboard::Clipboard;
 use orbit_protocol::{ClientMessage, ServerEvent, PROTOCOL_VERSION};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
 
 use crate::session::SpaceManager;
 
-type Stream = interprocess::local_socket::tokio::Stream;
-
-async fn write_msg(stream: &mut Stream, msg: &ServerEvent) -> Result<()> {
+async fn write_msg<W: AsyncWrite + Unpin>(stream: &mut W, msg: &ServerEvent) -> Result<()> {
     let bytes = orbit_protocol::encode_message(msg)?;
     stream.write_all(&bytes).await?;
     Ok(())
 }
 
-async fn read_msg(stream: &mut Stream) -> Result<ClientMessage> {
+async fn read_msg<R: AsyncRead + Unpin>(stream: &mut R) -> Result<ClientMessage> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_le_bytes(len_buf) as usize;
@@ -29,7 +29,10 @@ async fn read_msg(stream: &mut Stream) -> Result<ClientMessage> {
     Ok(msg)
 }
 
-pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>) -> Result<()> {
+pub async fn handle_client<S>(mut stream: S, space_manager: Arc<SpaceManager>) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     match read_msg(&mut stream).await {
         Ok(ClientMessage::Hello {
             protocol_version, ..
@@ -200,6 +203,11 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
                             Err(e) => tracing::warn!("AgentLaunch split failed: {e:#}"),
                         }
                     }
+                    ClientMessage::UploadPayload { data, filename } => {
+                        if let Some(path) = save_payload(data, &filename).await {
+                            let _ = write_msg(&mut stream, &ServerEvent::PayloadReady { path }).await;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -215,4 +223,22 @@ pub async fn handle_client(mut stream: Stream, space_manager: Arc<SpaceManager>)
     }
     debug!("client disconnected");
     Ok(())
+}
+
+async fn save_payload(data: Vec<u8>, filename: &str) -> Option<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dir = PathBuf::from(home).join(".orbit").join("payloads");
+    tokio::fs::create_dir_all(&dir).await.ok()?;
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros())
+        .unwrap_or(0);
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin");
+    let path = dir.join(format!("{ts}.{ext}"));
+    tokio::fs::write(&path, &data).await.ok()?;
+    Some(path.to_string_lossy().into_owned())
 }

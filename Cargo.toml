@@ -21,7 +21,7 @@ authors = ["Linus"]
 # See 06_tech-design/01-tech-stack-and-workspace.md §2.2 and v5 pre-implementation checklist GAP 1.
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "signal", "fs", "process"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -63,8 +63,9 @@ libc = "0.2"
 # Clipboard (orbitd-only; used for CopyToClipboard IPC handler)
 arboard = "3"
 
-# Phase 3 dependencies (commented out — activate when Phase 3 starts)
-# base64 = "0.22"  # Kitty graphics protocol image encoding
+# Phase 3 dependencies
+russh = { version = "0.62", default-features = false, features = ["aws-lc-rs", "rsa"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Internal crates (path dependencies)
 orbit-protocol = { path = "crates/orbit-protocol" }

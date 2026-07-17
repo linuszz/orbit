@@ -1,13 +1,11 @@
 use anyhow::{bail, Context, Result};
 use interprocess::local_socket::tokio::prelude::*;
-use interprocess::local_socket::tokio::RecvHalf;
 use interprocess::local_socket::GenericFilePath;
 use orbit_protocol::{Capabilities, ClientMessage, FullState, ServerEvent, PROTOCOL_VERSION};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf};
 use tokio::sync::mpsc;
-use tracing::debug;
 
-fn default_socket_path() -> std::path::PathBuf {
+pub fn default_socket_path() -> std::path::PathBuf {
     let uid = unsafe { libc::getuid() };
 
     let runtime = format!("/run/user/{uid}");
@@ -26,13 +24,18 @@ fn default_socket_path() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("orbit-{uid}.sock"))
 }
 
-async fn write_msg(stream: &mut LocalSocketStream, msg: &ClientMessage) -> Result<()> {
+pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> AsyncStream for T {}
+
+type DynStream = Box<dyn AsyncStream>;
+
+async fn write_frame(stream: &mut (impl AsyncWrite + Unpin), msg: &ClientMessage) -> Result<()> {
     let bytes = orbit_protocol::encode_message(msg)?;
     stream.write_all(&bytes).await?;
     Ok(())
 }
 
-async fn read_event(stream: &mut LocalSocketStream) -> Result<ServerEvent> {
+async fn read_frame(stream: &mut (impl AsyncRead + Unpin)) -> Result<ServerEvent> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_le_bytes(len_buf) as usize;
@@ -46,7 +49,7 @@ async fn read_event(stream: &mut LocalSocketStream) -> Result<ServerEvent> {
 }
 
 pub struct IpcClient {
-    pub stream: LocalSocketStream,
+    stream: DynStream,
 }
 
 impl IpcClient {
@@ -57,13 +60,18 @@ impl IpcClient {
             .context("socket path not UTF-8")?
             .to_fs_name::<GenericFilePath>()?;
 
-        let mut stream = LocalSocketStream::connect(name)
+        let stream = LocalSocketStream::connect(name)
             .await
             .with_context(|| format!("failed to connect to orbitd at {}", path.display()))?;
-        debug!("connected to orbitd");
 
-        write_msg(
-            &mut stream,
+        Self::connect_with(Box::new(stream)).await
+    }
+
+    pub async fn connect_with(stream: DynStream) -> Result<(Self, FullState)> {
+        let mut client = Self { stream };
+
+        write_frame(
+            &mut client.stream,
             &ClientMessage::Hello {
                 client_version: env!("CARGO_PKG_VERSION").to_string(),
                 protocol_version: PROTOCOL_VERSION,
@@ -72,12 +80,9 @@ impl IpcClient {
         )
         .await?;
 
-        let event = read_event(&mut stream).await?;
+        let event = read_frame(&mut client.stream).await?;
         match event {
-            ServerEvent::Welcome { state, .. } => {
-                debug!("handshake complete");
-                Ok((Self { stream }, state))
-            }
+            ServerEvent::Welcome { state, .. } => Ok((client, state)),
             ServerEvent::ProtocolError { code, message } => {
                 bail!("orbitd rejected connection (code {code}): {message}");
             }
@@ -85,34 +90,29 @@ impl IpcClient {
         }
     }
 
-    pub async fn send(&mut self, msg: &ClientMessage) -> Result<()> {
-        write_msg(&mut self.stream, msg).await
-    }
-
     pub fn into_split(self) -> (IpcWriter, IpcReader) {
-        let (recv, send) = self.stream.split();
+        let (read_half, write_half) = tokio::io::split(self.stream);
         let (tx, rx) = mpsc::channel::<ClientMessage>(1024);
 
-        let send_half = send;
         tokio::spawn(async move {
-            let mut send = send_half;
+            let mut write_half = write_half;
             let mut rx = rx;
             while let Some(msg) = rx.recv().await {
                 let bytes = match orbit_protocol::encode_message(&msg) {
                     Ok(b) => b,
-                    // Skip oversized messages rather than killing the writer.
                     Err(_) => continue,
                 };
-                if send.write_all(&bytes).await.is_err() {
+                if write_half.write_all(&bytes).await.is_err() {
                     break;
                 }
             }
         });
 
-        (IpcWriter { tx }, IpcReader { stream: recv })
+        (IpcWriter { tx }, IpcReader { read_half })
     }
 }
 
+#[derive(Clone)]
 pub struct IpcWriter {
     tx: mpsc::Sender<ClientMessage>,
 }
@@ -125,20 +125,11 @@ impl IpcWriter {
 }
 
 pub struct IpcReader {
-    stream: RecvHalf,
+    read_half: ReadHalf<DynStream>,
 }
 
 impl IpcReader {
     pub async fn recv(&mut self) -> Result<ServerEvent> {
-        let mut len_buf = [0u8; 4];
-        self.stream.read_exact(&mut len_buf).await?;
-        let len = u32::from_le_bytes(len_buf) as usize;
-        if len > orbit_protocol::MAX_MSG_BYTES {
-            bail!("message too large: {len}");
-        }
-        let mut data = vec![0u8; len];
-        self.stream.read_exact(&mut data).await?;
-        let (msg, _) = orbit_protocol::decode_message(&data)?;
-        Ok(msg)
+        read_frame(&mut self.read_half).await
     }
 }

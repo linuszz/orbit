@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Capabilities {
@@ -115,6 +115,13 @@ pub enum ClientMessage {
     CopyToClipboard {
         text: String,
     },
+
+    // Phase 3: upload a local file (typically an image) to orbitd's payload store.
+    // orbitd replies with PayloadReady containing the remote filesystem path.
+    UploadPayload {
+        data: Vec<u8>,
+        filename: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,4 +177,9 @@ pub enum ServerEvent {
     },
 
     Ping,
+
+    // Phase 3: the uploaded payload is now available at `path` on the orbitd host.
+    PayloadReady {
+        path: String,
+    },
 }
