@@ -1,20 +1,22 @@
 //! Agent runtime: detection, state machine, registry.
 //! See `06_tech-design/04-server-architecture.md` §4 and `07-agent-data-model.md`.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{
-    atomic::{AtomicU32, Ordering},
-    Arc,
-};
+use std::collections::HashMap;
+#[cfg(target_os = "linux")]
+use std::collections::HashSet;
+use std::sync::Arc;
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use orbt_protocol::{
-    AgentDetail, AgentId, AgentInfo, AgentMetrics, AgentStatus, PaneId, ServerEvent, SpaceId,
-};
+use orbt_protocol::{AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
+#[cfg(target_os = "linux")]
+use orbt_protocol::{AgentDetail, AgentMetrics};
 use tokio::sync::{broadcast, RwLock};
 use tracing::debug;
 
 /// CLI process names that identify known agent tools.
+#[cfg(target_os = "linux")]
 const AGENT_PATTERNS: &[&str] = &[
     "claude",
     "claude-code",
@@ -25,6 +27,7 @@ const AGENT_PATTERNS: &[&str] = &[
 ];
 
 /// Script runner executables — when detected, also scan their path arguments.
+#[cfg(target_os = "linux")]
 const SCRIPT_RUNNERS: &[&str] = &["node", "npx", "python", "python3", "deno", "bun"];
 
 /// Output patterns that indicate an agent is waiting for user input (Blocked/Eclipse state).
@@ -73,6 +76,7 @@ pub struct AgentRegistry {
     agents: RwLock<Vec<AgentInfo>>,
     /// Maps AgentId → OS PID for abort support.
     pid_map: RwLock<HashMap<AgentId, u32>>,
+    #[cfg(target_os = "linux")]
     next_id: AtomicU32,
     event_bus: broadcast::Sender<ServerEvent>,
 }
@@ -82,6 +86,7 @@ impl AgentRegistry {
         Arc::new(Self {
             agents: RwLock::new(Vec::new()),
             pid_map: RwLock::new(HashMap::new()),
+            #[cfg(target_os = "linux")]
             next_id: AtomicU32::new(0),
             event_bus,
         })
@@ -134,15 +139,30 @@ impl AgentRegistry {
     /// On non-Linux, process detection is skipped (no /proc); block scanning still runs.
     pub fn watch_pane(self: Arc<Self>, pane_id: PaneId, space_id: SpaceId, shell_pid: u32) {
         tokio::spawn(async move {
+            // On non-Linux, process scanning is unavailable.
+            #[cfg(not(target_os = "linux"))]
+            let _ = (space_id, shell_pid);
+
             // pid → (AgentId, start_time); only populated on Linux
+            #[cfg(target_os = "linux")]
             let mut tracked: HashMap<u32, (AgentId, Instant)> = HashMap::new();
-            // Last meaningful output line seen from this pane (shown in card row 2).
+            #[cfg(not(target_os = "linux"))]
+            let tracked: HashMap<u32, (AgentId, Instant)> = HashMap::new();
+
+            // Last meaningful output line seen (shown in card row 2); Linux only.
+            #[cfg(target_os = "linux")]
             let mut last_output_line = String::new();
-            // Last progress percentage detected in PTY output (0.0–1.0); sent in 5s cycle.
+
+            // Last progress percentage detected; Linux only.
+            #[cfg(target_os = "linux")]
             let mut last_progress_pct: Option<f32> = None;
-            // pid → cpu ticks at last 5-second sample (for cpu% delta).
+
+            // pid → cpu ticks at last 5-second sample; Linux only.
+            #[cfg(target_os = "linux")]
             let mut cpu_prev: HashMap<u32, u64> = HashMap::new();
+            #[cfg(target_os = "linux")]
             let mut cpu_prev_time = Instant::now();
+
             let mut poll_count: u32 = 0;
             let mut rx = self.event_bus.subscribe();
             // Start first tick after 500 ms to match old sleep-at-top-of-loop behaviour.
@@ -162,8 +182,8 @@ impl AgentRegistry {
                                 let tail_start = data.len().saturating_sub(256);
                                 let tail = String::from_utf8_lossy(&data[tail_start..]);
 
-                                // Update last meaningful output line (always, so it's ready
-                                // when an agent is detected mid-session).
+                                // Update last meaningful output line (Linux only).
+                                #[cfg(target_os = "linux")]
                                 if let Some(line) = tail
                                     .lines()
                                     .map(|l| l.trim())
@@ -180,8 +200,8 @@ impl AgentRegistry {
                                 let is_prompt =
                                     BLOCK_PATTERNS.iter().any(|p| tail.contains(p));
 
-                                // Scan for progress percentage ("75%" or "75.5%") in output tail.
-                                // Updated value is included in the next 5 s metrics cycle.
+                                // Scan for progress percentage ("75%" or "75.5%").
+                                #[cfg(target_os = "linux")]
                                 if let Some(pct) = extract_progress(&tail) {
                                     last_progress_pct = Some(pct);
                                 }
@@ -353,42 +373,41 @@ impl AgentRegistry {
                         }
 
                         // Every 10 polls (~5 s): emit duration updates and resource metrics.
+                        // On non-Linux, tracked is always empty so this block is a no-op.
                         if poll_count % 10 == 0 {
                             #[cfg(target_os = "linux")]
-                            let elapsed_secs = cpu_prev_time.elapsed().as_secs_f32();
+                            {
+                                let elapsed_secs = cpu_prev_time.elapsed().as_secs_f32();
 
-                            for (cpid, (agent_id, start)) in &tracked {
-                                let duration_s = start.elapsed().as_secs() as u32;
-                                let (current_status, current_detail) = {
-                                    let mut agents = self.agents.write().await;
-                                    let Some(a) =
-                                        agents.iter_mut().find(|a| a.id == *agent_id)
-                                    else {
-                                        continue;
+                                for (cpid, (agent_id, start)) in &tracked {
+                                    let duration_s = start.elapsed().as_secs() as u32;
+                                    let (current_status, current_detail) = {
+                                        let mut agents = self.agents.write().await;
+                                        let Some(a) =
+                                            agents.iter_mut().find(|a| a.id == *agent_id)
+                                        else {
+                                            continue;
+                                        };
+                                        let d = a.detail.get_or_insert_with(Default::default);
+                                        d.duration_s = duration_s;
+                                        if last_progress_pct.is_some() {
+                                            d.progress = last_progress_pct;
+                                        }
+                                        (a.status.clone(), a.detail.clone().unwrap())
                                     };
-                                    let d = a.detail.get_or_insert_with(Default::default);
-                                    d.duration_s = duration_s;
-                                    // Include latest detected progress percentage, if any.
-                                    if last_progress_pct.is_some() {
-                                        d.progress = last_progress_pct;
-                                    }
-                                    (a.status.clone(), a.detail.clone().unwrap())
-                                };
-                                let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
-                                    agent_id: *agent_id,
-                                    new_status: current_status,
-                                    detail: Some(current_detail),
-                                });
+                                    let _ = self.event_bus.send(ServerEvent::AgentStatusChanged {
+                                        agent_id: *agent_id,
+                                        new_status: current_status,
+                                        detail: Some(current_detail),
+                                    });
 
-                                #[cfg(target_os = "linux")]
-                                {
                                     let rss_kb = read_rss_kb(*cpid);
-                                    let current_ticks =
-                                        read_cpu_ticks(*cpid).unwrap_or(0);
+                                    let current_ticks = read_cpu_ticks(*cpid).unwrap_or(0);
                                     // clk_tck = 100 ticks/s on virtually all Linux systems.
                                     const CLK_TCK: f32 = 100.0;
                                     let cpu_percent = if elapsed_secs > 0.5 {
-                                        let prev = cpu_prev.get(cpid).copied().unwrap_or(current_ticks);
+                                        let prev =
+                                            cpu_prev.get(cpid).copied().unwrap_or(current_ticks);
                                         let delta = current_ticks.saturating_sub(prev) as f32;
                                         Some((delta / (elapsed_secs * CLK_TCK) * 100.0).min(100.0))
                                     } else {
@@ -400,19 +419,17 @@ impl AgentRegistry {
                                     } else {
                                         vec![last_output_line.clone()]
                                     };
-                                    let _ = self.event_bus.send(ServerEvent::AgentMetricsUpdated {
-                                        agent_id: *agent_id,
-                                        metrics: AgentMetrics {
-                                            cpu_percent,
-                                            rss_kb,
-                                            recent_lines: recent,
-                                        },
-                                    });
+                                    let _ =
+                                        self.event_bus.send(ServerEvent::AgentMetricsUpdated {
+                                            agent_id: *agent_id,
+                                            metrics: AgentMetrics {
+                                                cpu_percent,
+                                                rss_kb,
+                                                recent_lines: recent,
+                                            },
+                                        });
                                 }
-                            }
 
-                            #[cfg(target_os = "linux")]
-                            {
                                 cpu_prev_time = Instant::now();
                             }
                         }
@@ -441,6 +458,7 @@ impl AgentRegistry {
 }
 
 /// Returns the canonical agent name for a PID if it is a known agent process.
+#[cfg(target_os = "linux")]
 fn agent_name_for(pid: u32) -> Option<String> {
     let cmdline = read_cmdline(pid)?;
     let args: Vec<&str> = cmdline.split('\0').filter(|s| !s.is_empty()).collect();
@@ -482,6 +500,7 @@ fn agent_name_for(pid: u32) -> Option<String> {
 }
 
 /// Extract the `--model` value from a process cmdline, if present.
+#[cfg(target_os = "linux")]
 fn extract_model(pid: u32) -> Option<String> {
     let cmdline = read_cmdline(pid)?;
     let args: Vec<&str> = cmdline.split('\0').filter(|s| !s.is_empty()).collect();
@@ -497,6 +516,7 @@ fn extract_model(pid: u32) -> Option<String> {
 }
 
 /// Extract a short task description from positional (non-flag) cmdline args.
+#[cfg(target_os = "linux")]
 fn extract_task(pid: u32) -> Option<String> {
     let cmdline = read_cmdline(pid)?;
     let args: Vec<&str> = cmdline.split('\0').filter(|s| !s.is_empty()).collect();
@@ -524,11 +544,6 @@ fn read_cmdline(pid: u32) -> Option<String> {
     std::fs::read(format!("/proc/{pid}/cmdline"))
         .ok()
         .map(|b| String::from_utf8_lossy(&b).into_owned())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn read_cmdline(_pid: u32) -> Option<String> {
-    None
 }
 
 /// Read the resident set size (VmRSS) for a process from /proc/<pid>/status.
@@ -608,16 +623,9 @@ fn child_processes(parent_pid: u32) -> Vec<u32> {
     result
 }
 
+#[cfg(target_os = "linux")]
 fn process_exists(pid: u32) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        std::path::Path::new(&format!("/proc/{pid}")).exists()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = pid;
-        false
-    }
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
 /// Strip ANSI/VT escape sequences (CSI, OSC, ESC+single-char) from `text`.
@@ -671,6 +679,7 @@ fn strip_ansi(text: &str) -> String {
 
 /// Scan `text` for the last "N%" or "N.N%" pattern and return it as a fraction [0.0, 1.0].
 /// Only matches values in [0.0, 100.0]. Returns None if none found.
+#[cfg(target_os = "linux")]
 fn extract_progress(text: &str) -> Option<f32> {
     let bytes = text.as_bytes();
     let mut last: Option<f32> = None;
@@ -701,6 +710,7 @@ fn extract_progress(text: &str) -> Option<f32> {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn extract_progress_basic() {
         assert_eq!(extract_progress("Compiling 75%"), Some(0.75));
@@ -709,16 +719,19 @@ mod tests {
         assert_eq!(extract_progress("no percent here"), None);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn extract_progress_last_wins() {
         assert_eq!(extract_progress("step 1: 30% step 2: 60%"), Some(0.6));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn extract_progress_decimal() {
         assert_eq!(extract_progress("99.5%"), Some(0.995));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn extract_progress_out_of_range_ignored() {
         assert_eq!(extract_progress("200% error"), None);
