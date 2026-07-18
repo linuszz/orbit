@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "crates/orbt",
-    "crates/orbtd",
     "crates/orbt-protocol",
     "crates/orbt-core",
     # "crates/orbit-plugin",  # Phase 4 (Mars): WASM plugin runtime. Uncomment when activating.
@@ -67,9 +66,10 @@ arboard = "3"
 russh = { version = "0.62", default-features = false, features = ["aws-lc-rs", "rsa"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# Internal crates (path dependencies)
-orbt-protocol = { path = "crates/orbt-protocol" }
-orbt-core = { path = "crates/orbt-core" }
+# Internal crates (path + version so `cargo publish` resolves from crates.io)
+orbt-protocol = { path = "crates/orbt-protocol", version = "0.1" }
+orbt-core = { path = "crates/orbt-core", version = "0.1" }
+
 
 [profile.release]
 opt-level = 3

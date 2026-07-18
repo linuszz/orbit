@@ -1,3 +1,4 @@
+mod daemon;
 mod events;
 mod ipc;
 mod ssh;
@@ -79,7 +80,7 @@ async fn main() -> Result<()> {
             .with_file(true)
             .with_line_number(true)
             .init();
-        return orbtd::run().await;
+        return daemon::run().await;
     }
 
     tracing_subscriber::fmt()

@@ -8,7 +8,7 @@ use orbt_protocol::{ClientMessage, ServerEvent, PROTOCOL_VERSION};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
 
-use crate::session::SpaceManager;
+use super::session::SpaceManager;
 
 async fn write_msg<W: AsyncWrite + Unpin>(stream: &mut W, msg: &ServerEvent) -> Result<()> {
     let bytes = orbt_protocol::encode_message(msg)?;

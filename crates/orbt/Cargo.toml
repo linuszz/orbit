@@ -29,10 +29,11 @@ futures = { workspace = true }
 libc = { workspace = true }
 orbt-protocol = { workspace = true }
 orbt-core = { workspace = true }
-orbtd = { path = "../orbtd" }
 toml = { workspace = true }
 serde = { workspace = true }
 unicode-width = { workspace = true }
 arboard = { workspace = true }
 russh = { workspace = true }
 image = { workspace = true }
+portable-pty = { workspace = true }
+regex = { workspace = true }

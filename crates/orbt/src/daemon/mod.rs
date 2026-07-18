@@ -12,7 +12,7 @@ use interprocess::local_socket::{GenericFilePath, ListenerOptions};
 use tokio::sync::broadcast;
 use tracing::{error, info};
 
-use crate::session::SpaceManager;
+use self::session::SpaceManager;
 use orbt_protocol::ServerEvent;
 
 pub use orbt_protocol::default_socket_path;

@@ -40,8 +40,8 @@ use orbt_protocol::{
 use portable_pty::PtySize;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
-use crate::agent::AgentRegistry;
-use crate::pty::{self, SharedChild, SharedMaster, SharedVtParser};
+use super::agent::AgentRegistry;
+use super::pty::{self, SharedChild, SharedMaster, SharedVtParser};
 
 const ADJECTIVES: &[&str] = &[
     "cosmic", "stellar", "quantum", "lunar", "solar", "orbital", "deep", "silent", "swift", "apex",
