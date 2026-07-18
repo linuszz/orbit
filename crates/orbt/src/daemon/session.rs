@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 /// Read the current working directory of a process from the OS.
 /// Falls back to `fallback` if the pid is unknown or the OS call fails.
-fn proc_cwd(pid: u32, fallback: &str) -> String {
+fn proc_cwd(_pid: u32, fallback: &str) -> String {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let pid = _pid;
     #[cfg(target_os = "linux")]
     {
         let path = format!("/proc/{}/cwd", pid);

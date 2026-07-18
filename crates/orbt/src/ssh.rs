@@ -101,7 +101,8 @@ fn check_known_hosts_interactive(
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
 async fn authenticate(handle: &mut russh::client::Handle<SshHandler>, user: &str) -> Result<()> {
-    // 1. Try SSH agent via SSH_AUTH_SOCK
+    // 1. Try SSH agent via SSH_AUTH_SOCK (Unix only)
+    #[cfg(unix)]
     if let Ok(sock_path) = std::env::var("SSH_AUTH_SOCK") {
         if let Ok(stream) = tokio::net::UnixStream::connect(&sock_path).await {
             let mut agent = russh::keys::agent::client::AgentClient::connect(stream);

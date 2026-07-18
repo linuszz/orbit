@@ -26,9 +26,12 @@ fn acquire_lock() -> Result<()> {
     if path.exists() {
         let pid_str = std::fs::read_to_string(&path)?;
         let pid: u32 = pid_str.trim().parse().unwrap_or(0);
+        #[cfg(unix)]
         if pid > 0 && unsafe { libc::kill(pid as i32, 0) } == 0 {
             bail!("orbtd already running (PID {pid})");
         }
+        #[cfg(not(unix))]
+        let _ = pid;
     }
     std::fs::write(&path, std::process::id().to_string())?;
     Ok(())
