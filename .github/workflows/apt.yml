@@ -118,7 +118,7 @@ jobs:
 
       - name: Export GPG public key
         run: |
-          gpg --armor --export "linus@orbt.sh" > repo/orbit.gpg.pub
+          gpg --armor --export "linus@orbt.sh" > repo/orbt.gpg.pub
 
       - name: Add install instructions
         run: |
@@ -130,10 +130,10 @@ jobs:
           <h1>Orbit apt repository</h1>
           <pre>
           # Install
-          curl -fsSL https://apt.orbt.sh/orbit.gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/orbit.gpg
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/orbit.gpg] https://apt.orbt.sh stable main" \
-            | sudo tee /etc/apt/sources.list.d/orbit.list
-          sudo apt update && sudo apt install orbit
+          curl -fsSL https://apt.orbt.sh/orbt.gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/orbt.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/orbt.gpg] https://apt.orbt.sh stable main" \
+            | sudo tee /etc/apt/sources.list.d/orbt.list
+          sudo apt update && sudo apt install orbt
           </pre>
           </body>
           </html>
