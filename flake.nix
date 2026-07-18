@@ -17,6 +17,9 @@
         pkgs = import nixpkgs { inherit system overlays; };
         rustToolchain = pkgs.rust-bin.stable.latest.default;
 
+        # Read version from workspace Cargo.toml — no manual bump needed.
+        version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+
         nativeBuildInputs = with pkgs; [
           rustToolchain
           pkg-config
@@ -26,20 +29,21 @@
         buildInputs = with pkgs; [
           openssl
         ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXrandr
-          xorg.libXi
+          # arboard (clipboard) needs X11 or Wayland on Linux
+          libx11
+          libxcursor
+          libxrandr
+          libxi
           libxkbcommon
           wayland
         ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
           pkgs.darwin.apple_sdk.frameworks.AppKit
           pkgs.darwin.apple_sdk.frameworks.Security
         ];
-      in {
-        packages.default = pkgs.rustPlatform.buildRustPackage {
+
+        orbt = pkgs.rustPlatform.buildRustPackage {
           pname = "orbt";
-          version = "0.1.6";
+          inherit version;
 
           src = ./.;
 
@@ -47,7 +51,6 @@
 
           inherit nativeBuildInputs buildInputs;
 
-          # Only build the orbt binary
           cargoBuildFlags = [ "-p" "orbt" "--bin" "orbt" ];
           cargoTestFlags = [ "-p" "orbt" "-p" "orbt-protocol" "-p" "orbt-core" ];
 
@@ -56,7 +59,20 @@
             homepage = "https://github.com/linuszz/orbt";
             license = licenses.agpl3Only;
             mainProgram = "orbt";
+            platforms = platforms.unix;
           };
+        };
+      in {
+        packages = {
+          default = orbt;
+          orbt = orbt;
+          orbit = orbt;   # alias
+        };
+
+        apps = {
+          default = { type = "app"; program = "${orbt}/bin/orbt"; };
+          orbt    = { type = "app"; program = "${orbt}/bin/orbt"; };
+          orbit   = { type = "app"; program = "${orbt}/bin/orbt"; };
         };
 
         devShells.default = pkgs.mkShell {
