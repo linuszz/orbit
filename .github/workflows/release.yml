@@ -117,6 +117,137 @@ jobs:
           event-type: new-release
           client-payload: '{"version": "${{ github.ref_name }}"}'
 
+      - name: Update Scoop manifest hash
+        run: |
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          WIN_HASH=$(curl -sL "https://github.com/linuszz/orbt/releases/download/${{ github.ref_name }}/orbt-windows-x86_64.zip" | sha256sum | cut -d' ' -f1)
+          jq --arg ver "$VER" --arg hash "$WIN_HASH" \
+            '.version = $ver |
+             .architecture["64bit"].url = "https://github.com/linuszz/orbt/releases/download/v\($ver)/orbt-windows-x86_64.zip" |
+             .architecture["64bit"].hash = $hash' \
+            packaging/scoop/orbt.json > packaging/scoop/orbt.json.tmp
+          mv packaging/scoop/orbt.json.tmp packaging/scoop/orbt.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packaging/scoop/orbt.json
+          git diff --cached --quiet || git commit -m "chore: update scoop manifest to ${{ github.ref_name }}"
+
+      - name: Update winget manifests
+        run: |
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          WIN_HASH=$(curl -sL "https://github.com/linuszz/orbt/releases/download/${{ github.ref_name }}/orbt-windows-x86_64.zip" | sha256sum | cut -d' ' -f1)
+          MDIR="packaging/winget/manifests/l/Linus/Orbt/${VER}"
+          mkdir -p "$MDIR"
+
+          cat > "$MDIR/Linus.Orbt.yaml" <<EOF
+          PackageIdentifier: Linus.Orbt
+          PackageVersion: ${VER}
+          DefaultLocale: en-US
+          ManifestType: version
+          ManifestVersion: 1.6.0
+          EOF
+
+          cat > "$MDIR/Linus.Orbt.installer.yaml" <<EOF
+          PackageIdentifier: Linus.Orbt
+          PackageVersion: ${VER}
+          MinimumOSVersion: 10.0.17763.0
+          InstallerType: zip
+          NestedInstallerType: portable
+          NestedInstallerFiles:
+            - RelativeFilePath: orbt.exe
+              PortableCommandAlias: orbt
+          Installers:
+            - Architecture: x64
+              InstallerUrl: https://github.com/linuszz/orbt/releases/download/v${VER}/orbt-windows-x86_64.zip
+              InstallerSha256: ${WIN_HASH}
+          ManifestType: installer
+          ManifestVersion: 1.6.0
+          EOF
+
+          cat > "$MDIR/Linus.Orbt.locale.en-US.yaml" <<EOF
+          PackageIdentifier: Linus.Orbt
+          PackageVersion: ${VER}
+          PackageLocale: en-US
+          Publisher: Linus
+          PublisherUrl: https://orbt.sh
+          PublisherSupportUrl: https://github.com/linuszz/orbt/issues
+          PackageName: Orbt
+          PackageUrl: https://github.com/linuszz/orbt
+          License: AGPL-3.0-only
+          LicenseUrl: https://github.com/linuszz/orbt/blob/main/LICENSE
+          ShortDescription: Universal terminal workspace — sessions, panes, and AI agents
+          Moniker: orbt
+          Tags:
+            - terminal
+            - multiplexer
+            - tui
+            - ssh
+            - agent
+            - cli
+          ReleaseNotesUrl: https://github.com/linuszz/orbt/releases/tag/v${VER}
+          ManifestType: defaultLocale
+          ManifestVersion: 1.6.0
+          EOF
+
+          # Strip leading whitespace from heredocs
+          for f in "$MDIR"/*.yaml; do sed -i 's/^          //' "$f"; done
+
+          git add "packaging/winget/"
+          git diff --cached --quiet || git commit -m "chore: add winget manifest for ${{ github.ref_name }}"
+
+      - name: Push packaging updates to main
+        run: git push origin HEAD:main
+
+      - name: Sync Scoop bucket repo
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${{ secrets.TAP_GITHUB_TOKEN }}@github.com/linuszz/scoop-orbt.git" /tmp/scoop-orbt
+          cp packaging/scoop/orbt.json /tmp/scoop-orbt/bucket/orbt.json
+          cd /tmp/scoop-orbt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/orbt.json
+          git diff --cached --quiet || git commit -m "chore: update orbt to ${{ github.ref_name }}"
+          git push
+
+      - name: Submit winget PR
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+        run: |
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          MDIR="packaging/winget/manifests/l/Linus/Orbt/${VER}"
+
+          # Fork winget-pkgs if not already done, then open PR
+          gh repo fork microsoft/winget-pkgs --clone=true --remote=true 2>/dev/null || true
+          cd /tmp
+          git clone "https://x-access-token:${{ secrets.WINGET_GITHUB_TOKEN }}@github.com/linuszz/winget-pkgs.git" winget-pkgs 2>/dev/null || true
+          cd winget-pkgs
+          git remote add upstream https://github.com/microsoft/winget-pkgs.git 2>/dev/null || true
+          git fetch upstream master
+          git checkout -b "orbt-${VER}" upstream/master
+
+          DEST="manifests/l/Linus/Orbt/${VER}"
+          mkdir -p "$DEST"
+          cp "$GITHUB_WORKSPACE/$MDIR/"*.yaml "$DEST/"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$DEST"
+          git commit -m "New package: Linus.Orbt version ${VER}"
+          git push origin "orbt-${VER}"
+
+          gh pr create \
+            --repo microsoft/winget-pkgs \
+            --head "linuszz:orbt-${VER}" \
+            --base master \
+            --title "New package: Linus.Orbt version ${VER}" \
+            --body "Automated submission for orbt ${VER}. See https://github.com/linuszz/orbt/releases/tag/v${VER}" \
+            2>&1 || echo "PR may already exist or require manual review"
+
       - name: Install Nix
         uses: cachix/install-nix-action@v27
         with:
