@@ -1,11 +1,11 @@
 {
-    "version": "0.1.6",
+    "version": "0.1.7",
     "description": "Universal terminal workspace — sessions, panes, and AI agents",
     "homepage": "https://github.com/linuszz/orbt",
     "license": "AGPL-3.0-only",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/linuszz/orbt/releases/download/v0.1.6/orbt-windows-x86_64.zip",
+            "url": "https://github.com/linuszz/orbt/releases/download/v0.1.7/orbt-windows-x86_64.zip",
             "hash": "PLACEHOLDER"
         }
     },

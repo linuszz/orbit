@@ -19,12 +19,19 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: orbt-linux-x86_64
+            ext: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact: orbt-macos-aarch64
+            ext: tar.gz
           - target: x86_64-apple-darwin
             os: macos-latest
             artifact: orbt-macos-x86_64
+            ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: orbt-windows-x86_64
+            ext: zip
 
     steps:
       - uses: actions/checkout@v4
@@ -43,21 +50,33 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake
 
+      - name: Install Windows system deps
+        if: runner.os == 'Windows'
+        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+
       - name: Build release binary
         run: cargo build -p orbt --release --target ${{ matrix.target }}
 
-      - name: Package
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ${{ matrix.artifact }}.tar.gz orbt
           mv ${{ matrix.artifact }}.tar.gz ../../../
 
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path orbt.exe -DestinationPath ../../../${{ matrix.artifact }}.zip
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.tar.gz
+          path: ${{ matrix.artifact }}.${{ matrix.ext }}
 
   release:
     name: Publish GitHub Release
@@ -78,6 +97,7 @@ jobs:
         with:
           files: |
             artifacts/**/*.tar.gz
+            artifacts/**/*.zip
             install.sh
           generate_release_notes: true
 
