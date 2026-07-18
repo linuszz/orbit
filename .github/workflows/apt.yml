@@ -47,7 +47,7 @@ jobs:
           Package: orbit
           Version: ${VER}
           Architecture: amd64
-          Maintainer: Linus <linus@orbt.sh>
+          Maintainer: Linus <jh@orbt.sh>
           Depends: libc6 (>= 2.17)
           Section: utils
           Priority: optional
@@ -109,16 +109,16 @@ jobs:
           mv dists/stable/Release.final dists/stable/Release
 
           # Sign
-          gpg --default-key "linus@orbt.sh" \
+          gpg --default-key "jh@orbt.sh" \
               --clearsign --output dists/stable/InRelease dists/stable/Release
-          gpg --default-key "linus@orbt.sh" \
+          gpg --default-key "jh@orbt.sh" \
               --armor --detach-sign --output dists/stable/Release.gpg dists/stable/Release
 
           cd ..
 
       - name: Export GPG public key
         run: |
-          gpg --armor --export "linus@orbt.sh" > repo/orbt.gpg.pub
+          gpg --armor --export "jh@orbt.sh" > repo/orbt.gpg.pub
 
       - name: Add install instructions
         run: |
