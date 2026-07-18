@@ -70,7 +70,6 @@ jobs:
           chmod 755 "${PKG}/DEBIAN/postinst"
 
           dpkg-deb --build --root-owner-group "${PKG}"
-          mv "${PKG}.deb" "orbt_${VER}_amd64.deb"
 
       - name: Import GPG key
         run: |
