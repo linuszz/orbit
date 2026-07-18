@@ -1,0 +1,16 @@
+[package]
+name = "orbit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Universal terminal workspace — sessions, panes, and AI agents. Install `orbt` instead: https://crates.io/crates/orbt"
+keywords = ["terminal", "multiplexer", "tui", "agent", "ssh"]
+categories = ["command-line-utilities"]
+readme = "README.md"
+
+[lib]
+name = "orbit"
+path = "src/lib.rs"

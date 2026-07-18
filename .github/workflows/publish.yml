@@ -39,3 +39,10 @@ jobs:
           cargo publish -p orbt --no-verify
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish orbit (name reservation)
+        run: |
+          sleep 20
+          cargo publish -p orbit --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

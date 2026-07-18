@@ -1,16 +1,17 @@
 # Maintainer: Linus <jh@orbt.sh>
-pkgname=orbt-bin
+pkgname=orbit-bin
 pkgver=0.1.9
 pkgrel=1
-pkgdesc="Universal terminal workspace — sessions, panes, and AI agents"
+pkgdesc="Universal terminal workspace — sessions, panes, and AI agents (alias: orbt)"
 arch=('x86_64')
 url="https://github.com/linuszz/orbt"
 license=('AGPL-3.0-only')
-provides=('orbt')
-conflicts=('orbt')
+provides=('orbit' 'orbt')
+conflicts=('orbit' 'orbt' 'orbt-bin')
 source_x86_64=("orbt-linux-x86_64-${pkgver}.tar.gz::https://github.com/linuszz/orbt/releases/download/v${pkgver}/orbt-linux-x86_64.tar.gz")
 sha256sums_x86_64=('SKIP')
 
 package() {
     install -Dm755 "${srcdir}/orbt" "${pkgdir}/usr/bin/orbt"
+    ln -s /usr/bin/orbt "${pkgdir}/usr/bin/orbit"
 }
