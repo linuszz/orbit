@@ -29,7 +29,7 @@ jobs:
 
       - name: Download Linux binary
         run: |
-          curl -sL "https://github.com/linuszz/orbt/releases/download/${{ steps.ver.outputs.tag }}/orbit-linux-x86_64.tar.gz" \
+          curl -sL "https://github.com/linuszz/orbt/releases/download/${{ steps.ver.outputs.tag }}/orbt-linux-x86_64.tar.gz" \
             | tar xz
 
       - name: Build .deb package
@@ -37,14 +37,14 @@ jobs:
           VER: ${{ steps.ver.outputs.version }}
         run: |
           # Standard Debian package directory layout
-          PKG="orbit_${VER}_amd64"
+          PKG="orbt_${VER}_amd64"
           mkdir -p "${PKG}/DEBIAN"
           mkdir -p "${PKG}/usr/bin"
-          cp orbit "${PKG}/usr/bin/orbit"
-          chmod 755 "${PKG}/usr/bin/orbit"
+          cp orbt "${PKG}/usr/bin/orbt"
+          chmod 755 "${PKG}/usr/bin/orbt"
 
           cat > "${PKG}/DEBIAN/control" <<EOF
-          Package: orbit
+          Package: orbt
           Version: ${VER}
           Architecture: amd64
           Maintainer: Linus <jh@orbt.sh>
@@ -53,8 +53,8 @@ jobs:
           Priority: optional
           Homepage: https://github.com/linuszz/orbt
           Description: Universal terminal workspace
-           Orbit is a terminal multiplexer with first-class AI agent runtime.
-           Run orbit to start the TUI; sessions persist after detach.
+           Orbt is a terminal multiplexer with first-class AI agent runtime.
+           Run orbt to start the TUI; sessions persist after detach.
           EOF
 
           # Strip leading whitespace from heredoc
@@ -64,13 +64,13 @@ jobs:
           #!/bin/sh
           set -e
           if [ "$1" = "configure" ]; then
-            mkdir -p "${HOME}/.orbit"
+            mkdir -p "${HOME}/.orbt"
           fi
           EOF
           chmod 755 "${PKG}/DEBIAN/postinst"
 
           dpkg-deb --build --root-owner-group "${PKG}"
-          mv "${PKG}.deb" "orbit_${VER}_amd64.deb"
+          mv "${PKG}.deb" "orbt_${VER}_amd64.deb"
 
       - name: Import GPG key
         run: |
@@ -82,7 +82,7 @@ jobs:
           VER: ${{ steps.ver.outputs.version }}
         run: |
           mkdir -p repo/pool/main
-          cp "orbit_${VER}_amd64.deb" repo/pool/main/
+          cp "orbt_${VER}_amd64.deb" repo/pool/main/
 
           mkdir -p repo/dists/stable/main/binary-amd64
 
@@ -93,13 +93,13 @@ jobs:
 
           # Release file
           cat > dists/stable/Release <<EOF
-          Origin: Orbit
-          Label: Orbit
+          Origin: Orbt
+          Label: Orbt
           Suite: stable
           Codename: stable
           Architectures: amd64
           Components: main
-          Description: Orbit terminal workspace apt repository
+          Description: Orbt terminal workspace apt repository
           EOF
 
           apt-ftparchive release dists/stable > dists/stable/Release.tmp
@@ -125,9 +125,9 @@ jobs:
           cat > repo/index.html <<'EOF'
           <!DOCTYPE html>
           <html>
-          <head><title>Orbit apt repository</title></head>
+          <head><title>Orbt apt repository</title></head>
           <body>
-          <h1>Orbit apt repository</h1>
+          <h1>Orbt apt repository</h1>
           <pre>
           # Install
           curl -fsSL https://apt.orbt.sh/orbt.gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/orbt.gpg
