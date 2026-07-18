@@ -1849,7 +1849,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
-name = "orbit"
+name = "orbt"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1860,9 +1860,9 @@ dependencies = [
  "image",
  "interprocess",
  "libc",
- "orbit-core",
- "orbit-protocol",
- "orbitd",
+ "orbt-core",
+ "orbt-protocol",
+ "orbtd",
  "ratatui",
  "russh",
  "serde",
@@ -1874,10 +1874,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-core"
+name = "orbt-core"
 version = "0.1.0"
 dependencies = [
- "orbit-protocol",
+ "orbt-protocol",
  "regex",
  "serde",
  "thiserror 1.0.69",
@@ -1887,7 +1887,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbit-protocol"
+name = "orbt-protocol"
 version = "0.1.0"
 dependencies = [
  "bincode",
@@ -1897,15 +1897,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbitd"
+name = "orbtd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
  "interprocess",
  "libc",
- "orbit-core",
- "orbit-protocol",
+ "orbt-core",
+ "orbt-protocol",
  "portable-pty",
  "regex",
  "sysinfo",

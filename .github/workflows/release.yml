@@ -83,7 +83,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
-          repository: linuszz/homebrew-orbit
+          repository: linuszz/homebrew-orbt
           event-type: new-release
           client-payload: '{"version": "${{ github.ref_name }}"}'
 
@@ -91,6 +91,6 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          repository: linuszz/orbit
+          repository: linuszz/orbt
           event-type: new-release
           client-payload: '{"version": "${{ github.ref_name }}"}'

@@ -37,5 +37,5 @@ anyhow = "1"
 interprocess = { version = "2", features = ["tokio"] }
 libc = "0.2"
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
-orbit-protocol = { path = "../crates/orbit-protocol" }
-orbit_tui = { path = "../crates/orbit", package = "orbit" }
+orbt-protocol = { path = "../crates/orbt-protocol" }
+orbt_tui = { path = "../crates/orbt", package = "orbt" }

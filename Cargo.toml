@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/orbit",
-    "crates/orbitd",
-    "crates/orbit-protocol",
-    "crates/orbit-core",
+    "crates/orbt",
+    "crates/orbtd",
+    "crates/orbt-protocol",
+    "crates/orbt-core",
     # "crates/orbit-plugin",  # Phase 4 (Mars): WASM plugin runtime. Uncomment when activating.
 ]
 exclude = ["tools"]
@@ -14,7 +14,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "AGPL-3.0-only"
-repository = "https://github.com/linuszz/orbit"
+repository = "https://github.com/linuszz/orbt"
 authors = ["Linus"]
 
 # Unified dependency versions. Each crate pulls via `{ workspace = true }`.
@@ -49,18 +49,18 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 
-# PTY + IPC + VT (shared by `orbit` and `orbitd`)
+# PTY + IPC + VT (shared by `orbit` and `orbtd`)
 interprocess = { version = "2", features = ["tokio"] }
 portable-pty = "0.9"
 vte = "0.13"
 
-# Process metrics (orbitd-only; declared in orbitd/Cargo.toml as an optional dep).
+# Process metrics (orbtd-only; declared in orbtd/Cargo.toml as an optional dep).
 # sysinfo = "0.30"
 
 # Unix-specific (SO_PEERCRED, getuid). Unix-only; gate with #[cfg(unix)].
 libc = "0.2"
 
-# Clipboard (orbitd-only; used for CopyToClipboard IPC handler)
+# Clipboard (orbtd-only; used for CopyToClipboard IPC handler)
 arboard = "3"
 
 # Phase 3 dependencies
@@ -68,8 +68,8 @@ russh = { version = "0.62", default-features = false, features = ["aws-lc-rs", "
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Internal crates (path dependencies)
-orbit-protocol = { path = "crates/orbit-protocol" }
-orbit-core = { path = "crates/orbit-core" }
+orbt-protocol = { path = "crates/orbt-protocol" }
+orbt-core = { path = "crates/orbt-core" }
 
 [profile.release]
 opt-level = 3

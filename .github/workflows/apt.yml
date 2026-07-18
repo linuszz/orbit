@@ -29,7 +29,7 @@ jobs:
 
       - name: Download Linux binary
         run: |
-          curl -sL "https://github.com/linuszz/orbit/releases/download/${{ steps.ver.outputs.tag }}/orbit-linux-x86_64.tar.gz" \
+          curl -sL "https://github.com/linuszz/orbt/releases/download/${{ steps.ver.outputs.tag }}/orbit-linux-x86_64.tar.gz" \
             | tar xz
 
       - name: Build .deb package
@@ -47,11 +47,11 @@ jobs:
           Package: orbit
           Version: ${VER}
           Architecture: amd64
-          Maintainer: Linus <linus@orbit.sh>
+          Maintainer: Linus <linus@orbt.sh>
           Depends: libc6 (>= 2.17)
           Section: utils
           Priority: optional
-          Homepage: https://github.com/linuszz/orbit
+          Homepage: https://github.com/linuszz/orbt
           Description: Universal terminal workspace
            Orbit is a terminal multiplexer with first-class AI agent runtime.
            Run orbit to start the TUI; sessions persist after detach.
@@ -109,16 +109,16 @@ jobs:
           mv dists/stable/Release.final dists/stable/Release
 
           # Sign
-          gpg --default-key "linus@orbit.sh" \
+          gpg --default-key "linus@orbt.sh" \
               --clearsign --output dists/stable/InRelease dists/stable/Release
-          gpg --default-key "linus@orbit.sh" \
+          gpg --default-key "linus@orbt.sh" \
               --armor --detach-sign --output dists/stable/Release.gpg dists/stable/Release
 
           cd ..
 
       - name: Export GPG public key
         run: |
-          gpg --armor --export "linus@orbit.sh" > repo/orbit.gpg.pub
+          gpg --armor --export "linus@orbt.sh" > repo/orbit.gpg.pub
 
       - name: Add install instructions
         run: |
@@ -130,8 +130,8 @@ jobs:
           <h1>Orbit apt repository</h1>
           <pre>
           # Install
-          curl -fsSL https://apt.orbit.sh/orbit.gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/orbit.gpg
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/orbit.gpg] https://apt.orbit.sh stable main" \
+          curl -fsSL https://apt.orbt.sh/orbit.gpg.pub | sudo gpg --dearmor -o /usr/share/keyrings/orbit.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/orbit.gpg] https://apt.orbt.sh stable main" \
             | sudo tee /etc/apt/sources.list.d/orbit.list
           sudo apt update && sudo apt install orbit
           </pre>
@@ -145,4 +145,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./repo
           force_orphan: true
-          cname: apt.orbit.sh
+          cname: apt.orbt.sh

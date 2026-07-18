@@ -1,10 +1,10 @@
-//! VT trace: connect to running orbitd, watch a pane's raw output for N seconds,
+//! VT trace: connect to running orbtd, watch a pane's raw output for N seconds,
 //! decode and display all escape sequences for diagnosis.
 //!
 //! Usage: cargo run --manifest-path tools/Cargo.toml --bin vt_trace [pane_id] [seconds]
 
 use interprocess::local_socket::GenericFilePath;
-use orbit_protocol::*;
+use orbt_protocol::*;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{timeout, Duration};
@@ -13,9 +13,9 @@ fn socket_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
     let rt = format!("/run/user/{uid}");
     if std::path::Path::new(&rt).exists() {
-        return PathBuf::from(rt).join("orbit.sock");
+        return PathBuf::from(rt).join("orbt.sock");
     }
-    std::env::temp_dir().join(format!("orbit-{uid}.sock"))
+    std::env::temp_dir().join(format!("orbt-{uid}.sock"))
 }
 
 async fn send_msg(s: &mut interprocess::local_socket::tokio::Stream, msg: &ClientMessage) -> anyhow::Result<()> {

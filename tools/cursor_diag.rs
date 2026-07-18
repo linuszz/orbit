@@ -1,11 +1,11 @@
-//! Cursor diagnostic: connects to running orbitd, dumps cursor_visible for
+//! Cursor diagnostic: connects to running orbtd, dumps cursor_visible for
 //! every pane in every space, then watches live PaneOutput for 10s to show
 //! cursor-state transitions as they arrive.
 //!
 //! Usage: cargo run --manifest-path tools/Cargo.toml --bin cursor_diag
 
 use interprocess::local_socket::GenericFilePath;
-use orbit_protocol::*;
+use orbt_protocol::*;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{timeout, Duration};
@@ -14,9 +14,9 @@ fn socket_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
     let rt = format!("/run/user/{uid}");
     if std::path::Path::new(&rt).exists() {
-        return PathBuf::from(rt).join("orbit.sock");
+        return PathBuf::from(rt).join("orbt.sock");
     }
-    std::env::temp_dir().join(format!("orbit-{uid}.sock"))
+    std::env::temp_dir().join(format!("orbt-{uid}.sock"))
 }
 
 async fn send_msg(

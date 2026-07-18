@@ -1,4 +1,4 @@
-//! Headless TUI render preview: connects to orbitd, fetches full state, renders
+//! Headless TUI render preview: connects to orbtd, fetches full state, renders
 //! the complete Orbit UI into a TestBackend, then dumps the result as ANSI-colored
 //! text to stdout so you can inspect the live UI without a real terminal.
 //!
@@ -8,7 +8,7 @@
 //!   cargo run --bin render_preview -- 120 30 --plain   # no ANSI colors
 
 use interprocess::local_socket::GenericFilePath;
-use orbit_protocol::*;
+use orbt_protocol::*;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::path::PathBuf;
@@ -18,9 +18,9 @@ fn socket_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
     let rt = format!("/run/user/{uid}");
     if std::path::Path::new(&rt).exists() {
-        return PathBuf::from(rt).join("orbit.sock");
+        return PathBuf::from(rt).join("orbt.sock");
     }
-    std::env::temp_dir().join(format!("orbit-{uid}.sock"))
+    std::env::temp_dir().join(format!("orbt-{uid}.sock"))
 }
 
 #[tokio::main]
@@ -30,12 +30,12 @@ async fn main() -> anyhow::Result<()> {
     let rows: u16 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(45);
     let plain = args.iter().any(|a| a == "--plain");
 
-    // Connect to orbitd
+    // Connect to orbtd
     let path = socket_path();
     let name = path.to_str().unwrap().to_fs_name::<GenericFilePath>()?;
     use interprocess::local_socket::tokio::prelude::*;
     let mut stream = interprocess::local_socket::tokio::Stream::connect(name).await
-        .map_err(|e| anyhow::anyhow!("Could not connect to orbitd at {:?}: {e}\nIs the daemon running?", path))?;
+        .map_err(|e| anyhow::anyhow!("Could not connect to orbtd at {:?}: {e}\nIs the daemon running?", path))?;
 
     let hello = ClientMessage::Hello {
         client_version: "0.1.0-preview".to_string(),
@@ -63,18 +63,18 @@ async fn main() -> anyhow::Result<()> {
     let total_cols = cols.saturating_sub(sidebar_w).max(20);
     let total_rows = rows.saturating_sub(3).max(5);
 
-    let mut app = orbit_tui::app::App::from_welcome(&state, total_cols, total_rows);
+    let mut app = orbt_tui::app::App::from_welcome(&state, total_cols, total_rows);
 
-    let settings = orbit_tui::app::load_settings();
+    let settings = orbt_tui::app::load_settings();
     app.theme_name = settings.theme.clone();
     app.sidebar_visible = settings.sidebar_visible;
     app.agent_panel_visible = settings.agent_panel_visible;
-    orbit_tui::tui::theme::set_theme(&app.theme_name);
+    orbt_tui::tui::theme::set_theme(&app.theme_name);
 
     // Render into TestBackend
     let backend = TestBackend::new(cols, rows);
     let mut terminal = Terminal::new(backend)?;
-    terminal.draw(|f| orbit_tui::render(f, &app))?;
+    terminal.draw(|f| orbt_tui::render(f, &app))?;
 
     // Output the rendered buffer as ANSI text
     let buf = terminal.backend().buffer().clone();

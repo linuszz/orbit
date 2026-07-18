@@ -4,7 +4,7 @@
 //! Usage: cargo run --manifest-path tools/Cargo.toml --bin full_dump [pane_id] [start_row] [end_row]
 
 use interprocess::local_socket::GenericFilePath;
-use orbit_protocol::*;
+use orbt_protocol::*;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -12,9 +12,9 @@ fn socket_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
     let rt = format!("/run/user/{uid}");
     if std::path::Path::new(&rt).exists() {
-        return PathBuf::from(rt).join("orbit.sock");
+        return PathBuf::from(rt).join("orbt.sock");
     }
-    std::env::temp_dir().join(format!("orbit-{uid}.sock"))
+    std::env::temp_dir().join(format!("orbt-{uid}.sock"))
 }
 
 async fn send_msg(s: &mut interprocess::local_socket::tokio::Stream, msg: &ClientMessage) -> anyhow::Result<()> {
@@ -33,12 +33,12 @@ async fn read_one(s: &mut interprocess::local_socket::tokio::Stream) -> anyhow::
     Ok(msg)
 }
 
-fn color_name(c: &orbit_protocol::TermColor) -> String {
+fn color_name(c: &orbt_protocol::TermColor) -> String {
     match c {
-        orbit_protocol::TermColor::Default => "def".to_string(),
-        orbit_protocol::TermColor::Ansi(n) => format!("ansi{n}"),
-        orbit_protocol::TermColor::Ansi256(n) => format!("256-{n}"),
-        orbit_protocol::TermColor::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+        orbt_protocol::TermColor::Default => "def".to_string(),
+        orbt_protocol::TermColor::Ansi(n) => format!("ansi{n}"),
+        orbt_protocol::TermColor::Ansi256(n) => format!("256-{n}"),
+        orbt_protocol::TermColor::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
     }
 }
 

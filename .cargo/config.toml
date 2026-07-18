@@ -3,5 +3,5 @@
 # Set `target` here only if cross-compiling.
 
 [env]
-# Override at runtime via ORBIT_LOG_LEVEL=debug, etc.
+# Override at runtime via ORBT_LOG_LEVEL=debug, etc.
 # RUST_LOG = "info"

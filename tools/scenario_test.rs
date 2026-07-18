@@ -1,6 +1,6 @@
 //! TUI scenario tests: daily shell usage, pane/tab/space workflows, rapid ops, render snapshots.
 //!
-//! Requires a running orbitd (`just daemon` or `cargo run -p orbitd`).
+//! Requires a running orbtd (`just daemon` or `cargo run -p orbtd`).
 //! Optionally dumps visual render snapshots via render_preview.
 //!
 //! Usage:
@@ -9,7 +9,7 @@
 //!   cargo run --bin scenario_test -- --plain     # no color in output
 
 use interprocess::local_socket::GenericFilePath;
-use orbit_protocol::*;
+use orbt_protocol::*;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{timeout, Duration};
@@ -20,9 +20,9 @@ fn socket_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
     let rt = format!("/run/user/{uid}");
     if std::path::Path::new(&rt).exists() {
-        return PathBuf::from(rt).join("orbit.sock");
+        return PathBuf::from(rt).join("orbt.sock");
     }
-    std::env::temp_dir().join(format!("orbit-{uid}.sock"))
+    std::env::temp_dir().join(format!("orbt-{uid}.sock"))
 }
 
 struct Conn {
@@ -36,7 +36,7 @@ impl Conn {
         use interprocess::local_socket::tokio::prelude::*;
         let stream = interprocess::local_socket::tokio::Stream::connect(name)
             .await
-            .map_err(|e| anyhow::anyhow!("Cannot connect to orbitd at {path:?}: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("Cannot connect to orbtd at {path:?}: {e}"))?;
         let mut this = Self { stream };
         let hello = ClientMessage::Hello {
             client_version: "0.1.0-scenario".to_string(),
@@ -231,7 +231,7 @@ async fn scen_initial_state(conn: &mut Conn) -> ScenResult {
 // Scenario 2: Echo command — basic PTY round-trip
 // ═══════════════════════════════════════════════════════════════════
 async fn scen_echo(conn: &mut Conn) -> ScenResult {
-    let marker = format!("ORBIT_SCEN_{}", std::time::SystemTime::now()
+    let marker = format!("ORBT_SCEN_{}", std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().subsec_millis());
     if !conn.run_cmd(&format!("echo {marker}"), &marker, 5000).await {
         fail!("echo output not received");
@@ -275,8 +275,8 @@ async fn scen_long_output(conn: &mut Conn) -> ScenResult {
 // Scenario 6: Environment variable roundtrip
 // ═══════════════════════════════════════════════════════════════════
 async fn scen_env_var(conn: &mut Conn) -> ScenResult {
-    let val = "ORBIT_TEST_VAL_42";
-    if !conn.run_cmd(&format!("export ORBIT_TESTVAR={val}; echo $ORBIT_TESTVAR"), val, 5000).await {
+    let val = "ORBT_TEST_VAL_42";
+    if !conn.run_cmd(&format!("export ORBT_TESTVAR={val}; echo $ORBT_TESTVAR"), val, 5000).await {
         fail!("env var not echoed back");
     }
     pass!()
@@ -971,7 +971,7 @@ async fn scen_erase_with_background(conn: &mut Conn) -> ScenResult {
     let rows = g.rows as usize;
     let has_red_bg = (0..rows).any(|row| {
         let row_cells = &g.cells[row * cols..(row + 1) * cols];
-        row_cells.iter().any(|c| c.bg == orbit_protocol::TermColor::Ansi(1))
+        row_cells.iter().any(|c| c.bg == orbt_protocol::TermColor::Ansi(1))
     });
     ensure!(has_red_bg, "erase_line did not preserve background color: no Ansi(1) cells found anywhere in pane");
     pass!()
@@ -1058,7 +1058,7 @@ async fn main() -> anyhow::Result<()> {
     let do_snap = args.contains(&"--snap".to_string());
 
     println!("=== Orbit Scenario Tests ===\n");
-    println!("Connecting to orbitd...");
+    println!("Connecting to orbtd...");
     let (mut conn, _) = Conn::connect().await?;
     println!("Connected.\n");
 

@@ -1,7 +1,7 @@
-//! Integration test: connects to a running orbitd, exercises space/tab/pane operations.
+//! Integration test: connects to a running orbtd, exercises space/tab/pane operations.
 
 use interprocess::local_socket::GenericFilePath;
-use orbit_protocol::*;
+use orbt_protocol::*;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{timeout, Duration};
@@ -10,9 +10,9 @@ fn socket_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
     let rt = format!("/run/user/{uid}");
     if std::path::Path::new(&rt).exists() {
-        return PathBuf::from(rt).join("orbit.sock");
+        return PathBuf::from(rt).join("orbt.sock");
     }
-    std::env::temp_dir().join(format!("orbit-{uid}.sock"))
+    std::env::temp_dir().join(format!("orbt-{uid}.sock"))
 }
 
 struct Conn {
@@ -294,7 +294,7 @@ async fn test_pane_input_output(conn: &mut Conn) -> bool {
     let tab = space.tabs.iter().find(|t| t.id == space.active_tab).unwrap();
     let pane_id = tab.active_pane;
 
-    let marker = "ORBIT_INTEG_7391";
+    let marker = "ORBT_INTEG_7391";
     let cmd = format!("echo {marker}\r");
     conn.send(&ClientMessage::PaneInput {
         tab_id: tab.id,
@@ -355,7 +355,7 @@ async fn test_create_space(conn: &mut Conn) -> bool {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("=== Orbit Integration Tests ===\n");
-    println!("Connecting to orbitd...");
+    println!("Connecting to orbtd...");
 
     let (mut conn, state) = Conn::connect().await?;
     println!("Connected. Running tests...\n");
