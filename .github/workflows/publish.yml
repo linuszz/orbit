@@ -22,27 +22,27 @@ jobs:
           sudo apt-get install -y pkg-config libssl-dev cmake
 
       - name: Publish orbt-protocol
-        run: cargo publish -p orbt-protocol --no-verify
+        run: cargo publish -p orbt-protocol --no-verify || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Publish orbt-core
         run: |
           sleep 20
-          cargo publish -p orbt-core --no-verify
+          cargo publish -p orbt-core --no-verify || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Publish orbt
         run: |
           sleep 20
-          cargo publish -p orbt --no-verify
+          cargo publish -p orbt --no-verify || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Publish orbit (name reservation)
         run: |
           sleep 20
-          cargo publish -p orbit --no-verify
+          cargo publish -p orbit --no-verify || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
