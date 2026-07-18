@@ -4,14 +4,14 @@
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
 use std::collections::HashSet;
-use std::sync::Arc;
 #[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use orbt_protocol::{AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
 #[cfg(target_os = "linux")]
 use orbt_protocol::{AgentDetail, AgentMetrics};
+use orbt_protocol::{AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
 use tokio::sync::{broadcast, RwLock};
 use tracing::debug;
 
