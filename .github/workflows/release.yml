@@ -64,6 +64,8 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ${{ matrix.artifact }}.tar.gz orbt
           mv ${{ matrix.artifact }}.tar.gz ../../../
+          cd ../../..
+          sha256sum ${{ matrix.artifact }}.tar.gz | cut -d' ' -f1 > ${{ matrix.artifact }}.tar.gz.sha256
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -71,12 +73,17 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           Compress-Archive -Path orbt.exe -DestinationPath ../../../${{ matrix.artifact }}.zip
+          cd ../../..
+          $hash = (Get-FileHash "${{ matrix.artifact }}.zip" -Algorithm SHA256).Hash.ToLower()
+          $hash | Out-File -NoNewline "${{ matrix.artifact }}.zip.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.${{ matrix.ext }}
+          path: |
+            ${{ matrix.artifact }}.${{ matrix.ext }}
+            ${{ matrix.artifact }}.${{ matrix.ext }}.sha256
 
   release:
     name: Publish GitHub Release
@@ -97,7 +104,9 @@ jobs:
         with:
           files: |
             artifacts/**/*.tar.gz
+            artifacts/**/*.tar.gz.sha256
             artifacts/**/*.zip
+            artifacts/**/*.zip.sha256
             install.sh
           generate_release_notes: true
 
