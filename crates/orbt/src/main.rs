@@ -26,7 +26,11 @@ fn parse_remote_arg() -> Option<String> {
 
 // Attempt to connect to local orbtd. On failure, spawn `orbit daemon` as a
 // background process, wait briefly for it to bind the socket, then retry once.
-async fn connect_local_with_autostart() -> Result<(crate::ipc::IpcWriter, crate::ipc::IpcReader, orbt_protocol::FullState)> {
+async fn connect_local_with_autostart() -> Result<(
+    crate::ipc::IpcWriter,
+    crate::ipc::IpcReader,
+    orbt_protocol::FullState,
+)> {
     if let Ok((ipc, state)) = IpcClient::connect().await {
         let (w, r) = ipc.into_split();
         return Ok((w, r, state));

@@ -14,9 +14,9 @@ pub mod socket;
 pub mod types;
 
 pub use encoding::{decode_message, encode_message, MAX_MSG_BYTES};
-pub use socket::default_socket_path;
 pub use error::ProtocolError;
 pub use messages::{Capabilities, ClientMessage, ServerEvent, PROTOCOL_VERSION};
+pub use socket::default_socket_path;
 pub use types::{
     AgentDetail, AgentId, AgentInfo, AgentLaunchRequest, AgentMetrics, AgentStatus, Cell,
     CellFlags, CellGrid, FullState, ImageId, PaneId, PaneInfo, PaneLayout, ScrollbackLine, SpaceId,

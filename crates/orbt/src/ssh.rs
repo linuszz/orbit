@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use orbt_protocol::FullState;
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
@@ -100,10 +100,7 @@ fn check_known_hosts_interactive(
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
-async fn authenticate(
-    handle: &mut russh::client::Handle<SshHandler>,
-    user: &str,
-) -> Result<()> {
+async fn authenticate(handle: &mut russh::client::Handle<SshHandler>, user: &str) -> Result<()> {
     // 1. Try SSH agent via SSH_AUTH_SOCK
     if let Ok(sock_path) = std::env::var("SSH_AUTH_SOCK") {
         if let Ok(stream) = tokio::net::UnixStream::connect(&sock_path).await {
@@ -111,7 +108,12 @@ async fn authenticate(
             if let Ok(identities) = agent.request_identities().await {
                 for identity in identities {
                     let pub_key = identity.public_key().into_owned();
-                    let hash_alg = handle.best_supported_rsa_hash().await.ok().flatten().flatten();
+                    let hash_alg = handle
+                        .best_supported_rsa_hash()
+                        .await
+                        .ok()
+                        .flatten()
+                        .flatten();
                     let res = handle
                         .authenticate_publickey_with(user, pub_key, hash_alg, &mut agent)
                         .await;
@@ -133,7 +135,12 @@ async fn authenticate(
             continue;
         }
         if let Ok(key_pair) = russh::keys::load_secret_key(&key_path, None) {
-            let hash_alg = handle.best_supported_rsa_hash().await.ok().flatten().flatten();
+            let hash_alg = handle
+                .best_supported_rsa_hash()
+                .await
+                .ok()
+                .flatten()
+                .flatten();
             let res = handle
                 .authenticate_publickey(
                     user,
@@ -161,9 +168,7 @@ fn dirs_home() -> PathBuf {
 
 // ─── Remote socket path resolution ───────────────────────────────────────────
 
-async fn resolve_remote_socket(
-    handle: &mut russh::client::Handle<SshHandler>,
-) -> Result<String> {
+async fn resolve_remote_socket(handle: &mut russh::client::Handle<SshHandler>) -> Result<String> {
     let mut channel = handle
         .channel_open_session()
         .await
@@ -205,10 +210,9 @@ pub async fn connect_remote(spec: &RemoteSpec) -> Result<(IpcWriter, IpcReader, 
         port: spec.port,
     };
 
-    let mut handle =
-        russh::client::connect(config, (spec.host.as_str(), spec.port), handler)
-            .await
-            .with_context(|| format!("SSH connect failed to {}:{}", spec.host, spec.port))?;
+    let mut handle = russh::client::connect(config, (spec.host.as_str(), spec.port), handler)
+        .await
+        .with_context(|| format!("SSH connect failed to {}:{}", spec.host, spec.port))?;
 
     authenticate(&mut handle, &spec.user).await?;
 
@@ -218,9 +222,7 @@ pub async fn connect_remote(spec: &RemoteSpec) -> Result<(IpcWriter, IpcReader, 
     let channel = handle
         .channel_open_direct_streamlocal(&remote_socket)
         .await
-        .with_context(|| {
-            format!("failed to open direct-streamlocal channel to {remote_socket}")
-        })?;
+        .with_context(|| format!("failed to open direct-streamlocal channel to {remote_socket}"))?;
 
     let stream = channel.into_stream();
 
