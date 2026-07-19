@@ -65,6 +65,7 @@ arboard = "3"
 
 # Phase 3 dependencies
 russh = { version = "0.62", default-features = false, features = ["aws-lc-rs", "rsa"] }
+rpassword = "7"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Internal crates (path + version so `cargo publish` resolves from crates.io)

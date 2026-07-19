@@ -100,7 +100,7 @@ fn check_known_hosts_interactive(
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
-async fn authenticate(handle: &mut russh::client::Handle<SshHandler>, user: &str) -> Result<()> {
+async fn authenticate(handle: &mut russh::client::Handle<SshHandler>, user: &str, host: &str) -> Result<()> {
     // 1. Try SSH agent via SSH_AUTH_SOCK (Unix only)
     #[cfg(unix)]
     if let Ok(sock_path) = std::env::var("SSH_AUTH_SOCK") {
@@ -128,37 +128,67 @@ async fn authenticate(handle: &mut russh::client::Handle<SshHandler>, user: &str
         }
     }
 
-    // 2. Try key files
+    // 2. Try key files (with passphrase prompt for encrypted keys)
     let home = dirs_home();
     for filename in &["id_ed25519", "id_ecdsa", "id_rsa"] {
         let key_path = home.join(".ssh").join(filename);
         if !key_path.exists() {
             continue;
         }
-        if let Ok(key_pair) = russh::keys::load_secret_key(&key_path, None) {
-            let hash_alg = handle
-                .best_supported_rsa_hash()
-                .await
-                .ok()
-                .flatten()
-                .flatten();
-            let res = handle
-                .authenticate_publickey(
-                    user,
-                    russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash_alg),
-                )
-                .await;
-            match res {
-                Ok(AuthResult::Success) => return Ok(()),
-                Ok(AuthResult::Failure { .. }) => continue,
-                Err(e) => {
-                    tracing::debug!("auth with {filename} failed: {e:#}");
+        let key_pair = match russh::keys::load_secret_key(&key_path, None) {
+            Ok(kp) => kp,
+            Err(e) => {
+                let msg = e.to_string().to_lowercase();
+                if msg.contains("passphrase")
+                    || msg.contains("encrypt")
+                    || msg.contains("decrypt")
+                    || msg.contains("bad decrypt")
+                {
+                    let prompt = format!("Enter passphrase for {}: ", key_path.display());
+                    let pass = rpassword::prompt_password(&prompt)
+                        .context("failed to read passphrase")?;
+                    match russh::keys::load_secret_key(&key_path, Some(pass.as_str())) {
+                        Ok(kp) => kp,
+                        Err(_) => {
+                            eprintln!("Bad passphrase for {filename}.");
+                            continue;
+                        }
+                    }
+                } else {
+                    tracing::debug!("could not load {filename}: {e:#}");
+                    continue;
                 }
             }
+        };
+        let hash_alg = handle
+            .best_supported_rsa_hash()
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+        let res = handle
+            .authenticate_publickey(
+                user,
+                russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash_alg),
+            )
+            .await;
+        match res {
+            Ok(AuthResult::Success) => return Ok(()),
+            Ok(AuthResult::Failure { .. }) => continue,
+            Err(e) => tracing::debug!("auth with {filename} failed: {e:#}"),
         }
     }
 
-    bail!("SSH authentication failed for '{user}' — ensure an SSH key is loaded or SSH_AUTH_SOCK is set");
+    // 3. Password authentication
+    let prompt = format!("{user}@{host}'s password: ");
+    let password = rpassword::prompt_password(&prompt).context("failed to read password")?;
+    match handle.authenticate_password(user, password).await {
+        Ok(AuthResult::Success) => return Ok(()),
+        Ok(AuthResult::Failure { .. }) => {}
+        Err(e) => tracing::debug!("password auth failed: {e:#}"),
+    }
+
+    bail!("SSH authentication failed for '{user}' — wrong password, or password auth is disabled on the server");
 }
 
 fn dirs_home() -> PathBuf {
@@ -215,7 +245,7 @@ pub async fn connect_remote(spec: &RemoteSpec) -> Result<(IpcWriter, IpcReader, 
         .await
         .with_context(|| format!("SSH connect failed to {}:{}", spec.host, spec.port))?;
 
-    authenticate(&mut handle, &spec.user).await?;
+    authenticate(&mut handle, &spec.user, &spec.host).await?;
 
     let remote_socket = resolve_remote_socket(&mut handle).await?;
     tracing::debug!("remote orbit socket: {remote_socket}");
