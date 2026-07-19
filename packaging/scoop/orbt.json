@@ -1,30 +1,37 @@
 {
-    "version": "0.1.9",
-    "description": "Universal terminal workspace — sessions, panes, and AI agents",
-    "homepage": "https://github.com/linuszz/orbt",
-    "license": "AGPL-3.0-only",
-    "architecture": {
-        "64bit": {
-            "url": "https://github.com/linuszz/orbt/releases/download/v0.1.9/orbt-windows-x86_64.zip",
-            "hash": "d464fffb2efbfb5b8f84a62b153da33145d97b02a8e368be58533f6cd6f9c2fc"
-        }
-    },
-    "bin": "orbt.exe",
-    "shortcuts": [["orbt.exe", "orbt"]],
-    "suggest": {
-        "Windows Terminal": ["Microsoft.WindowsTerminal"]
-    },
-    "checkver": {
-        "github": "https://github.com/linuszz/orbt"
-    },
-    "autoupdate": {
-        "architecture": {
-            "64bit": {
-                "url": "https://github.com/linuszz/orbt/releases/download/v$version/orbt-windows-x86_64.zip",
-                "hash": {
-                    "url": "$url.sha256"
-                }
-            }
-        }
+  "version": "0.1.10",
+  "description": "Universal terminal workspace — sessions, panes, and AI agents",
+  "homepage": "https://github.com/linuszz/orbt",
+  "license": "AGPL-3.0-only",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/linuszz/orbt/releases/download/v0.1.10/orbt-windows-x86_64.zip",
+      "hash": "4c35471b46d19ed2e066d564d48d47fb13274bb87940ba7ac91800a4d6a91098"
     }
+  },
+  "bin": "orbt.exe",
+  "shortcuts": [
+    [
+      "orbt.exe",
+      "orbt"
+    ]
+  ],
+  "suggest": {
+    "Windows Terminal": [
+      "Microsoft.WindowsTerminal"
+    ]
+  },
+  "checkver": {
+    "github": "https://github.com/linuszz/orbt"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/linuszz/orbt/releases/download/v$version/orbt-windows-x86_64.zip",
+        "hash": {
+          "url": "$url.sha256"
+        }
+      }
+    }
+  }
 }
