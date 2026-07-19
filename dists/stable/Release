@@ -1,0 +1,24 @@
+Origin: Orbt
+Label: Orbt
+Suite: stable
+Codename: stable
+Architectures: amd64
+Components: main
+Description: Orbt terminal workspace apt repository
+Date: Sun, 19 Jul 2026 22:41:27 +0000
+MD5Sum:
+ cabee84765c01ce830d1fdde7043c3aa              146 Release
+ 3ffe9c63980f9a1c5c769251ee212a14              568 main/binary-amd64/Packages
+ 93070b43b4e3a7af51a32630e967a60c              441 main/binary-amd64/Packages.gz
+SHA1:
+ 456b5c9c634a8b359a81edad98f57c46b7f4b172              146 Release
+ 4eaef1b80bd3be2992810404dc38298a21f12311              568 main/binary-amd64/Packages
+ 063790dd095f30c9f7f52764759d90a7a9be8d22              441 main/binary-amd64/Packages.gz
+SHA256:
+ 51ccf2439d96155f00a092370efdb8d9ddc6ab26465140e2a09a4d6d4d152322              146 Release
+ ee5246c4ce1012393bdd85662d2f39a6f8d7a2c24ab18351d6bc6f461f42a878              568 main/binary-amd64/Packages
+ 283e33ce7292d23ef6e65fdc38ba845007a0d9b3d4324c98567f180a5631c129              441 main/binary-amd64/Packages.gz
+SHA512:
+ 21b0198d63be6c62c1c3cae0360d22f11d0ee052c4d76a8b725abed42a44e0b580172e12a666e179446fe24110068658a69d4e71cbd99e9e224a79cd07cdf216              146 Release
+ d301c30ca16f7d323b69da3e0c8b6705fb7d3bdeb6fbdae313812c30eef10f2a1e5c9b4ab49082ad33ad5201c949df96c5ca727c5abeb66628c080c37e9bb3db              568 main/binary-amd64/Packages
+ 6ae1ce439cf5579739fe3a9f6634ea494da3e2247622fe913647526d29f2c920dfa5df433354292e6496715ea95b8b32ea3a0dba2281e7a2e489368cdace834d              441 main/binary-amd64/Packages.gz
