@@ -155,23 +155,54 @@ Orbit watches the processes running inside your panes and tracks AI coding agent
 
 ## Key bindings
 
-All actions are available through the command palette. The most common ones:
+All actions are also accessible through the command palette (`Ctrl+B`).
+
+**Pane**
 
 | Keys | Action |
 |---|---|
-| `Ctrl+B` | Open command palette |
-| `Ctrl+B h` / `v` | Split pane horizontal / vertical |
+| `Ctrl+B %` | Split pane horizontal |
+| `Ctrl+B "` | Split pane vertical |
 | `Ctrl+B x` | Close active pane |
+| `Ctrl+B o` | Cycle pane focus |
+| `Ctrl+B z` | Zoom pane (toggle fullscreen) |
+| `Ctrl+B [` | Scrollback / copy mode — `j`/`k` scroll, `Esc` exit |
+| `Ctrl+B I` | Paste image from clipboard into pane |
+
+**Tab**
+
+| Keys | Action |
+|---|---|
 | `Ctrl+B c` | New tab |
 | `Ctrl+B n` / `p` | Next / previous tab |
-| `Ctrl+B [` | Scrollback mode (`j`/`k` scroll, `Esc` exit) |
-| `Ctrl+B a` | Toggle agent panel |
+
+**View**
+
+| Keys | Action |
+|---|---|
 | `Ctrl+B b` | Toggle workspace sidebar |
-| `Ctrl+B d` | Detach (Go Dark — session persists) |
+| `Ctrl+B a` | Toggle agent panel |
 | `Ctrl+B T` | Cycle theme |
 | `Ctrl+B ,` | Settings |
+| `Ctrl+B ?` | Help |
 
-Mouse: click to focus, drag to resize, drag tabs to reorder, right-click for context menu.
+**Session**
+
+| Keys | Action |
+|---|---|
+| `Ctrl+B d` | Detach (Go Dark — session persists) |
+
+**Agent panel** (after `Ctrl+B a`)
+
+| Keys | Action |
+|---|---|
+| `j` / `k` | Navigate agent cards |
+| `r` | Restart errored agent |
+| `s` | Stop agent |
+| `d` | Dismiss completed agent |
+| `Esc` / `q` | Exit agent panel |
+
+Mouse: click to focus, drag to resize panes, drag to reorder tabs, right-click for context menu.
 
 ---
 
