@@ -7,6 +7,65 @@ use orbt_protocol::{
     ServerEvent, SpaceId, SplitDir, TabId,
 };
 
+/// Which column has keyboard focus in the mobile SPACES two-column view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MobileColFocus {
+    #[default]
+    Left,
+    Right,
+}
+
+/// Mobile layout view tabs (bottom navigation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MobileView {
+    /// Full-screen PTY terminal (default).
+    #[default]
+    Terminal,
+    /// Agent Fleet list.
+    Agents,
+    /// Tab/space switcher.
+    Windows,
+    /// Command palette / settings.
+    Actions,
+}
+
+impl MobileView {
+    /// Cycle forward through the four views (TTY → WINDOWS → COMMAND → AGENTS → TTY).
+    pub fn next(self) -> Self {
+        match self {
+            Self::Terminal => Self::Windows,
+            Self::Windows => Self::Actions,
+            Self::Actions => Self::Agents,
+            Self::Agents => Self::Terminal,
+        }
+    }
+
+    /// Cycle backward through the four views.
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Terminal => Self::Agents,
+            Self::Agents => Self::Actions,
+            Self::Actions => Self::Windows,
+            Self::Windows => Self::Terminal,
+        }
+    }
+}
+
+/// Identifies what is being closed in a mobile close-confirmation dialog.
+#[derive(Debug, Clone)]
+pub enum MobileCloseTarget {
+    Space(usize),
+    Tab(usize),
+}
+
+/// State for the mobile close-confirmation modal.
+#[derive(Debug, Clone)]
+pub struct MobileCloseConfirm {
+    pub target: MobileCloseTarget,
+    /// true = Confirm button focused; false = Cancel button focused (safe default).
+    pub confirm_focused: bool,
+}
+
 /// How the Agent Fleet panel is displayed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -209,20 +268,20 @@ pub static COMMANDS: &[CommandDef] = &[
     // tmux: c = new window, n/p = next/prev, l = last
     CommandDef {
         id: "new_tab",
-        label: "New Window",
-        group: "Window",
+        label: "New Tab",
+        group: "Tab",
         shortcut: "c",
     },
     CommandDef {
         id: "next_tab",
-        label: "Next Window",
-        group: "Window",
+        label: "Next Tab",
+        group: "Tab",
         shortcut: "n",
     },
     CommandDef {
         id: "prev_tab",
-        label: "Previous Window",
-        group: "Window",
+        label: "Previous Tab",
+        group: "Tab",
         shortcut: "p",
     },
     // tmux: d = detach
@@ -391,6 +450,18 @@ pub struct App {
     /// Set when orbtd acknowledges an UploadPayload with the remote path.
     /// events.rs drains this and injects the path as PTY input.
     pub pending_payload_path: Option<String>,
+    /// True when terminal dimensions trigger mobile mode (cols < 80 || rows < 25).
+    pub mobile_mode: bool,
+    /// Active view in mobile bottom-nav layout.
+    pub mobile_view: MobileView,
+    /// Cursor row in the left (Spaces) column of the SPACES view.
+    pub mobile_spaces_cursor: usize,
+    /// Cursor row in the right (Tabs) column of the SPACES view.
+    pub mobile_tabs_cursor: usize,
+    /// Which column has keyboard focus in the SPACES view.
+    pub mobile_col_focus: MobileColFocus,
+    /// Pending close confirmation modal state (mobile SPACES view).
+    pub mobile_close_confirm: Option<MobileCloseConfirm>,
 }
 
 #[derive(Debug, Clone)]
@@ -562,6 +633,12 @@ impl App {
             settings_open: false,
             settings_selected: 0,
             pending_payload_path: None,
+            mobile_mode: cols < 80 || rows < 25,
+            mobile_view: MobileView::Terminal,
+            mobile_spaces_cursor: 0,
+            mobile_tabs_cursor: 0,
+            mobile_col_focus: MobileColFocus::Left,
+            mobile_close_confirm: None,
         }
     }
 

@@ -748,7 +748,12 @@ pub fn render_modal(frame: &mut Frame, screen: Rect, app: &App) {
 
     let x = screen.x + screen.width.saturating_sub(modal_w) / 2;
     let y = screen.y + screen.height.saturating_sub(modal_h) / 2;
-    let area = Rect { x, y, width: modal_w, height: modal_h };
+    let area = Rect {
+        x,
+        y,
+        width: modal_w,
+        height: modal_h,
+    };
 
     // Clear background area to avoid bleed-through from pane content.
     frame.render_widget(Clear, area);

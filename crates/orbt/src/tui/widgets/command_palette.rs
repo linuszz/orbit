@@ -46,7 +46,30 @@ fn build_row_map(filtered: &[usize], search: &str) -> RowMap {
     }
 }
 
+/// Render the command palette over `area`, dimming everything except the sidebar.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+    let sb_w = if app.sidebar_visible {
+        crate::tui::SIDEBAR_W
+    } else {
+        crate::tui::SIDEBAR_COLLAPSED_W
+    };
+    let dim_area = Rect {
+        x: area.x + sb_w,
+        y: area.y,
+        width: area.width.saturating_sub(sb_w),
+        height: area.height,
+    };
+    render_inner(frame, area, dim_area, app);
+}
+
+/// Render the command palette over `area` without any dim overlay.
+/// Used by mobile COMMAND view — terminal content shows through unchanged.
+pub fn render_mobile(frame: &mut Frame, area: Rect, app: &App) {
+    let no_dim = Rect { x: area.x, y: area.y, width: 0, height: 0 };
+    render_inner(frame, area, no_dim, app);
+}
+
+fn render_inner(frame: &mut Frame, area: Rect, dim_area: Rect, app: &App) {
     if let InputMode::CommandPalette {
         search,
         selected,
@@ -64,17 +87,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             height: palette_h,
         };
 
-        let sb_w = if app.sidebar_visible {
-            crate::tui::SIDEBAR_W
-        } else {
-            crate::tui::SIDEBAR_COLLAPSED_W
-        };
-        let dim_area = Rect {
-            x: area.x + sb_w,
-            y: area.y,
-            width: area.width.saturating_sub(sb_w),
-            height: area.height,
-        };
         let dim =
             Block::default().style(Style::default().bg(ratatui::style::Color::Rgb(10, 10, 14)));
         frame.render_widget(dim, dim_area);

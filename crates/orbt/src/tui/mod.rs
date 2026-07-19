@@ -17,7 +17,7 @@ use ratatui::{
 };
 use std::io::{self, Stdout};
 
-use crate::app::{AgentPanelMode, App, InputMode, PaneState, Selection};
+use crate::app::{AgentPanelMode, App, InputMode, MobileView, PaneState, Selection};
 use orbt_protocol::Cell;
 use orbt_protocol::PaneLayout;
 use theme::*;
@@ -222,6 +222,83 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     if app.settings_open {
         widgets::settings_modal::render(frame, area, app);
+    }
+}
+
+/// Mobile layout: header (1 row) + content (fills) + nav bar (1 row).
+pub fn render_mobile(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+    if area.height < 3 {
+        return;
+    }
+
+    let header_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
+    let nav_area = Rect {
+        x: area.x,
+        y: area.y + area.height - 1,
+        width: area.width,
+        height: 1,
+    };
+    let content_area = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: area.height.saturating_sub(2),
+    };
+
+    widgets::mobile_nav::render_header(frame, header_area, app);
+    widgets::mobile_nav::render_nav(frame, nav_area, app);
+
+    match app.mobile_view {
+        MobileView::Terminal => {
+            frame.render_widget(Clear, content_area);
+            render_pane_tree(frame, content_area, app.pane_tree(), app);
+
+            // Overlay: command palette, eclipse modal, settings, etc.
+            if matches!(app.mode, InputMode::CommandPalette { .. }) {
+                widgets::command_palette::render(frame, content_area, app);
+            }
+            if app.eclipse_modal.is_some() {
+                widgets::eclipse_modal::render(frame, content_area, app);
+            }
+            if app.settings_open {
+                widgets::settings_modal::render(frame, content_area, app);
+            }
+            if app.launch_modal.is_some() {
+                widgets::launch_modal::render(frame, content_area, app);
+            }
+            if app.context_menu.is_some() {
+                widgets::context_menu::render(frame, content_area, app);
+            }
+        }
+        MobileView::Agents => {
+            frame.render_widget(Clear, content_area);
+            widgets::agent_monitor::render(frame, content_area, app);
+            if app.eclipse_modal.is_some() {
+                widgets::eclipse_modal::render(frame, content_area, app);
+            }
+        }
+        MobileView::Windows => {
+            widgets::mobile_spaces::render(frame, content_area, app);
+            if app.mobile_close_confirm.is_some() {
+                widgets::mobile_confirm::render(frame, content_area, app);
+            }
+        }
+        MobileView::Actions => {
+            // PTY underneath (same as Terminal view), palette floats on top.
+            // render_mobile dims the full content_area uniformly (no sidebar offset).
+            render_pane_tree(frame, content_area, app.pane_tree(), app);
+            if app.settings_open {
+                widgets::settings_modal::render(frame, content_area, app);
+            } else {
+                widgets::command_palette::render_mobile(frame, content_area, app);
+            }
+        }
     }
 }
 
@@ -977,7 +1054,7 @@ mod tests {
 
         // Command palette should show some command labels
         assert!(buffer_contains(&terminal, "Split Horizontal"));
-        assert!(buffer_contains(&terminal, "New Window"));
+        assert!(buffer_contains(&terminal, "New Tab"));
     }
 
     #[test]

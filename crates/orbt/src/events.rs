@@ -8,9 +8,12 @@ use tracing::debug;
 
 use crate::ipc::{IpcReader, IpcWriter};
 use orbt_tui::app::{
-    AgentHover, AgentPanelMode, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS,
+    AgentHover, AgentPanelMode, App, ContextMenuItem, ContextMenuTarget, InputMode, MobileCloseConfirm,
+    MobileCloseTarget, MobileColFocus, MobileView, COMMANDS,
 };
-use orbt_tui::tui::{agent_panel_width, render, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
+use orbt_tui::tui::{
+    agent_panel_width, render, render_mobile, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W,
+};
 
 fn is_prefix_key(key: &KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b')
@@ -241,6 +244,17 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
         _ => {}
     }
 
+    // Mobile: after executing any command from the Actions view, return to Terminal
+    // so the user immediately sees the result full-screen. Exclude commands that open
+    // their own overlay (settings, help) — those stay in Actions until Esc.
+    if app.mobile_mode
+        && app.mobile_view == MobileView::Actions
+        && !matches!(id, "settings" | "help")
+    {
+        app.mobile_view = MobileView::Terminal;
+        app.mode = InputMode::Normal;
+    }
+
     app.needs_redraw = true;
 }
 
@@ -410,7 +424,289 @@ async fn handle_eclipse_key(key: KeyEvent, app: &mut App, writer: &IpcWriter) {
     }
 }
 
+/// Execute a confirmed close action from the mobile close-confirmation modal.
+async fn apply_mobile_close(confirm: MobileCloseConfirm, app: &mut App, writer: &IpcWriter) {
+    match confirm.target {
+        MobileCloseTarget::Space(idx) => {
+            if app.spaces.len() > 1 {
+                if let Some(space) = app.spaces.get(idx) {
+                    let space_id = space.space_id;
+                    let _ = writer.send(ClientMessage::CloseSpace { space_id }).await;
+                }
+            }
+        }
+        MobileCloseTarget::Tab(idx) => {
+            if app.tabs.len() > 1 {
+                if let Some(tab) = app.tabs.get(idx) {
+                    let tab_id = tab.id;
+                    let _ = writer.send(ClientMessage::CloseTab { tab_id }).await;
+                }
+            }
+        }
+    }
+}
+
+/// Handle keyboard input when the close-confirmation modal is open.
+/// Always consumes the key.
+async fn handle_mobile_close_confirm_key(
+    key: KeyEvent,
+    app: &mut App,
+    writer: &IpcWriter,
+) {
+    match key.code {
+        KeyCode::Left | KeyCode::Char('h') => {
+            if let Some(ref mut c) = app.mobile_close_confirm {
+                c.confirm_focused = false;
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => {
+            if let Some(ref mut c) = app.mobile_close_confirm {
+                c.confirm_focused = !c.confirm_focused;
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(confirm) = app.mobile_close_confirm.take() {
+                if confirm.confirm_focused {
+                    apply_mobile_close(confirm, app, writer).await;
+                }
+            }
+        }
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.mobile_close_confirm = None;
+        }
+        _ => {}
+    }
+    app.needs_redraw = true;
+}
+
+/// Mobile-mode key handler. Returns true if the key was consumed.
+async fn handle_mobile_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, _term_h: u16) -> bool {
+    // Modals still capture input in mobile mode.
+    if app.launch_modal.is_some() || app.eclipse_modal.is_some() {
+        return false;
+    }
+
+    // Close-confirmation modal intercepts all keys.
+    if app.mobile_close_confirm.is_some() {
+        handle_mobile_close_confirm_key(key, app, writer).await;
+        return true;
+    }
+
+    // Tab cycles through mobile views.
+    if key.code == KeyCode::Tab {
+        app.mobile_view = app.mobile_view.next();
+        // Entering Actions view: open command palette.
+        if app.mobile_view == MobileView::Actions {
+            app.mode = InputMode::CommandPalette {
+                search: String::new(),
+                selected: 0,
+                search_focused: false,
+            };
+        } else {
+            app.mode = InputMode::Normal;
+        }
+        app.needs_redraw = true;
+        return true;
+    }
+
+    match app.mobile_view {
+        MobileView::Terminal => {
+            // Esc when in an overlay returns to Normal/Terminal.
+            if key.code == KeyCode::Esc {
+                if app.settings_open {
+                    app.settings_open = false;
+                    app.needs_redraw = true;
+                    return true;
+                }
+                if matches!(app.mode, InputMode::CommandPalette { .. }) {
+                    app.mode = InputMode::Normal;
+                    app.needs_redraw = true;
+                    return true;
+                }
+            }
+            // Fall through to normal key handler for PTY passthrough.
+            false
+        }
+        MobileView::Agents => {
+            // Mirror AgentPanel mode key handling.
+            let n = app.agents.len();
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if n > 0 {
+                        let sel = if let InputMode::AgentPanel { selected } = app.mode {
+                            selected.saturating_sub(1)
+                        } else {
+                            0
+                        };
+                        app.mode = InputMode::AgentPanel { selected: sel };
+                    }
+                    app.needs_redraw = true;
+                    true
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if n > 0 {
+                        let sel = if let InputMode::AgentPanel { selected } = app.mode {
+                            (selected + 1).min(n - 1)
+                        } else {
+                            0
+                        };
+                        app.mode = InputMode::AgentPanel { selected: sel };
+                    }
+                    app.needs_redraw = true;
+                    true
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    app.mobile_view = MobileView::Terminal;
+                    app.mode = InputMode::Normal;
+                    app.needs_redraw = true;
+                    true
+                }
+                _ => false,
+            }
+        }
+        MobileView::Windows => {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    match app.mobile_col_focus {
+                        MobileColFocus::Left => {
+                            app.mobile_spaces_cursor =
+                                app.mobile_spaces_cursor.saturating_sub(1);
+                        }
+                        MobileColFocus::Right => {
+                            app.mobile_tabs_cursor =
+                                app.mobile_tabs_cursor.saturating_sub(1);
+                        }
+                    }
+                    app.needs_redraw = true;
+                    true
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    match app.mobile_col_focus {
+                        MobileColFocus::Left => {
+                            let max = app.spaces.len(); // cursor=max → "+Space" button
+                            app.mobile_spaces_cursor =
+                                (app.mobile_spaces_cursor + 1).min(max);
+                        }
+                        MobileColFocus::Right => {
+                            let max = app.tabs.len(); // cursor=max → "+ New Tab" button
+                            app.mobile_tabs_cursor =
+                                (app.mobile_tabs_cursor + 1).min(max);
+                        }
+                    }
+                    app.needs_redraw = true;
+                    true
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    app.mobile_col_focus = MobileColFocus::Left;
+                    app.needs_redraw = true;
+                    true
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    app.mobile_col_focus = MobileColFocus::Right;
+                    app.needs_redraw = true;
+                    true
+                }
+                KeyCode::Enter => {
+                    match app.mobile_col_focus {
+                        MobileColFocus::Left => {
+                            let cursor = app.mobile_spaces_cursor;
+                            if cursor < app.spaces.len() {
+                                // Switch space, stay in SPACES to pick a tab
+                                let space_id = app.spaces[cursor].space_id;
+                                let _ = writer
+                                    .send(ClientMessage::SwitchSpace { space_id })
+                                    .await;
+                                app.active_space_idx = cursor;
+                                app.mobile_tabs_cursor = 0;
+                            } else {
+                                // "+Space" button
+                                let _ = writer
+                                    .send(ClientMessage::CreateSpace { name: None })
+                                    .await;
+                            }
+                        }
+                        MobileColFocus::Right => {
+                            let cursor = app.mobile_tabs_cursor;
+                            if cursor < app.tabs.len() {
+                                // Switch tab, go to Terminal
+                                app.selection = None;
+                                app.active_tab = cursor;
+                                app.active_tab_id = app.tabs[cursor].id;
+                                if let Some(&first) = app.pane_tree().leaves().first() {
+                                    app.active_pane = first;
+                                }
+                                let _ = writer
+                                    .send(ClientMessage::SwitchTab {
+                                        tab_id: app.active_tab_id,
+                                    })
+                                    .await;
+                                app.mobile_view = MobileView::Terminal;
+                            } else {
+                                // "+ New Tab" button
+                                let _ = writer
+                                    .send(ClientMessage::NewTab { name: None })
+                                    .await;
+                            }
+                        }
+                    }
+                    app.needs_redraw = true;
+                    true
+                }
+                KeyCode::Delete | KeyCode::Char('x') => {
+                    match app.mobile_col_focus {
+                        MobileColFocus::Left => {
+                            let cursor = app.mobile_spaces_cursor;
+                            if cursor < app.spaces.len() && app.spaces.len() > 1 {
+                                app.mobile_close_confirm = Some(MobileCloseConfirm {
+                                    target: MobileCloseTarget::Space(cursor),
+                                    confirm_focused: false,
+                                });
+                            }
+                        }
+                        MobileColFocus::Right => {
+                            let cursor = app.mobile_tabs_cursor;
+                            if cursor < app.tabs.len() && app.tabs.len() > 1 {
+                                app.mobile_close_confirm = Some(MobileCloseConfirm {
+                                    target: MobileCloseTarget::Tab(cursor),
+                                    confirm_focused: false,
+                                });
+                            }
+                        }
+                    }
+                    app.needs_redraw = true;
+                    true
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    app.mobile_view = MobileView::Terminal;
+                    app.needs_redraw = true;
+                    true
+                }
+                _ => false,
+            }
+        }
+        MobileView::Actions => {
+            // Esc closes the palette and returns to Terminal.
+            if key.code == KeyCode::Esc {
+                app.mobile_view = MobileView::Terminal;
+                app.mode = InputMode::Normal;
+                app.settings_open = false;
+                app.needs_redraw = true;
+                return true;
+            }
+            // All other keys (including Enter on a command) fall through to the normal
+            // CommandPalette / settings handler, which will call execute_command and
+            // then the auto-return logic above fires.
+            false
+        }
+    }
+}
+
 async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u16) {
+    // Mobile-mode navigation intercepts before normal key dispatch.
+    if app.mobile_mode && handle_mobile_key(key, app, writer, term_h).await {
+        return;
+    }
+
     // Launch modal captures all keyboard input when open.
     if app.launch_modal.is_some() {
         handle_launch_key(key, app, writer).await;
@@ -513,7 +809,11 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                 return;
             }
 
-            if search.is_empty() {
+            // In mobile Actions view the palette is always fullscreen — pane navigation
+            // would close it without switching panes visibly, so skip this block there.
+            if search.is_empty()
+                && !(app.mobile_mode && app.mobile_view == MobileView::Actions)
+            {
                 let Some(tab) = app.tabs.get(app.active_tab) else {
                     app.mode = InputMode::Normal;
                     return;
@@ -848,7 +1148,11 @@ pub async fn run(
         orbt_tui::tui::theme::set_theme(&app.theme_name);
 
         if app.needs_redraw {
-            terminal.draw(|frame| render(frame, app))?;
+            if app.mobile_mode {
+                terminal.draw(|frame| render_mobile(frame, app))?;
+            } else {
+                terminal.draw(|frame| render(frame, app))?;
+            }
             app.needs_redraw = false;
         }
 
@@ -903,6 +1207,12 @@ pub async fn run(
                         handle_key(key, app, &writer, term_h).await;
                     }
                     Some(Ok(Event::Resize(cols, rows))) => {
+                        let was_mobile = app.mobile_mode;
+                        app.mobile_mode = cols < 80 || rows < 25;
+                        if was_mobile != app.mobile_mode {
+                            // Mode switched — reset mobile view to Terminal.
+                            app.mobile_view = MobileView::Terminal;
+                        }
                         send_pane_resizes(app, &writer, cols, rows).await;
                         app.needs_redraw = true;
                     }
@@ -1158,12 +1468,312 @@ async fn handle_eclipse_modal_mouse(
     }
 }
 
+async fn handle_mobile_mouse(
+    mouse: crossterm::event::MouseEvent,
+    app: &mut App,
+    writer: &IpcWriter,
+    term_size: ratatui::layout::Rect,
+) {
+    let term_h = term_size.height;
+    let term_w = term_size.width;
+    let nav_row = term_h.saturating_sub(1);
+
+    // Modals take priority.
+    if app.eclipse_modal.is_some() {
+        handle_eclipse_modal_mouse(mouse, app, writer, term_size).await;
+        return;
+    }
+    if app.launch_modal.is_some() {
+        handle_launch_modal_mouse(mouse, app, writer, term_size).await;
+        return;
+    }
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if mouse.row == nav_row && term_w >= 8 {
+                // Bottom nav bar click: determine which of the 4 tabs was clicked.
+                let tab_w = term_w / 4;
+                let col = mouse.column;
+                let view = if col < tab_w {
+                    MobileView::Terminal
+                } else if col < tab_w * 2 {
+                    MobileView::Windows
+                } else if col < tab_w * 3 {
+                    MobileView::Actions
+                } else {
+                    MobileView::Agents
+                };
+                app.mobile_view = view;
+                if view == MobileView::Actions {
+                    app.mode = InputMode::CommandPalette {
+                        search: String::new(),
+                        selected: 0,
+                        search_focused: false,
+                    };
+                } else {
+                    app.mode = InputMode::Normal;
+                }
+                app.needs_redraw = true;
+                return;
+            }
+
+            // Content area clicks (row 1..nav_row).
+            if mouse.row > 0 && mouse.row < nav_row {
+                match app.mobile_view {
+                    MobileView::Terminal => {
+                        // Forward click to PTY.
+                        let pane_area = ratatui::layout::Rect {
+                            x: 0,
+                            y: 1,
+                            width: term_w,
+                            height: nav_row.saturating_sub(1),
+                        };
+                        // Check for pane click — same logic as desktop but with mobile area.
+                        let leaves = orbt_tui::tui::compute_leaf_areas(app.pane_tree(), pane_area);
+                        for (pid, rect) in &leaves {
+                            if mouse.column >= rect.x
+                                && mouse.column < rect.x + rect.width
+                                && mouse.row >= rect.y
+                                && mouse.row < rect.y + rect.height
+                            {
+                                if app.active_pane != *pid {
+                                    app.active_pane = *pid;
+                                    let _ = writer
+                                        .send(ClientMessage::FocusPane {
+                                            tab_id: app.active_tab_id,
+                                            pane_id: *pid,
+                                        })
+                                        .await;
+                                    app.needs_redraw = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    MobileView::Agents => {
+                        // Simple: click opens Eclipse modal for blocked agents.
+                        // Full agent card interaction is handled by enter key.
+                    }
+                    MobileView::Windows => {
+                        use orbt_tui::tui::widgets::mobile_confirm::{
+                            hit_test as confirm_hit_test, ConfirmHit,
+                        };
+                        use orbt_tui::tui::widgets::mobile_spaces::{hit_test, SpacesHit};
+                        let content_area = ratatui::layout::Rect {
+                            x: 0,
+                            y: 1,
+                            width: term_w,
+                            height: nav_row.saturating_sub(1),
+                        };
+                        // If the confirm modal is open, route all clicks to it.
+                        if app.mobile_close_confirm.is_some() {
+                            match confirm_hit_test(mouse.column, mouse.row, content_area) {
+                                ConfirmHit::Confirm => {
+                                    if let Some(confirm) = app.mobile_close_confirm.take() {
+                                        apply_mobile_close(confirm, app, writer).await;
+                                    }
+                                }
+                                ConfirmHit::Cancel | ConfirmHit::Outside => {
+                                    app.mobile_close_confirm = None;
+                                }
+                            }
+                            app.needs_redraw = true;
+                        } else {
+                            match hit_test(mouse.column, mouse.row, content_area, app) {
+                                SpacesHit::Space(idx) => {
+                                    app.mobile_spaces_cursor = idx;
+                                    app.mobile_col_focus = MobileColFocus::Left;
+                                    let space_id = app.spaces[idx].space_id;
+                                    let _ = writer
+                                        .send(ClientMessage::SwitchSpace { space_id })
+                                        .await;
+                                    app.active_space_idx = idx;
+                                    app.mobile_tabs_cursor = 0;
+                                }
+                                SpacesHit::SpaceClose(idx) => {
+                                    if app.spaces.len() > 1 {
+                                        app.mobile_close_confirm = Some(MobileCloseConfirm {
+                                            target: MobileCloseTarget::Space(idx),
+                                            confirm_focused: false,
+                                        });
+                                    }
+                                }
+                                SpacesHit::NewSpace => {
+                                    let _ = writer
+                                        .send(ClientMessage::CreateSpace { name: None })
+                                        .await;
+                                }
+                                SpacesHit::Tab(idx) => {
+                                    app.mobile_tabs_cursor = idx;
+                                    app.mobile_col_focus = MobileColFocus::Right;
+                                    app.selection = None;
+                                    app.active_tab = idx;
+                                    app.active_tab_id = app.tabs[idx].id;
+                                    if let Some(&first) = app.pane_tree().leaves().first() {
+                                        app.active_pane = first;
+                                    }
+                                    let _ = writer
+                                        .send(ClientMessage::SwitchTab {
+                                            tab_id: app.active_tab_id,
+                                        })
+                                        .await;
+                                    app.mobile_view = MobileView::Terminal;
+                                }
+                                SpacesHit::TabClose(idx) => {
+                                    if app.tabs.len() > 1 {
+                                        app.mobile_close_confirm = Some(MobileCloseConfirm {
+                                            target: MobileCloseTarget::Tab(idx),
+                                            confirm_focused: false,
+                                        });
+                                    }
+                                }
+                                SpacesHit::NewTab => {
+                                    let _ = writer
+                                        .send(ClientMessage::NewTab { name: None })
+                                        .await;
+                                }
+                                SpacesHit::None => {}
+                            }
+                            app.needs_redraw = true;
+                        }
+                    }
+                    MobileView::Actions => {
+                        // Forward click to the command palette.
+                        // Compute palette geometry (mirrors command_palette::render).
+                        let content_h = nav_row.saturating_sub(1);
+                        let content_area = ratatui::layout::Rect {
+                            x: 0,
+                            y: 1,
+                            width: term_w,
+                            height: content_h,
+                        };
+                        let palette_w = 50u16.min(content_area.width.saturating_sub(4));
+                        let palette_h = 20u16.min(content_area.height.saturating_sub(4));
+                        let px = content_area.x + (content_area.width - palette_w) / 2;
+                        let py = content_area.y + (content_area.height - palette_h) / 2;
+                        // Inner list starts after border(1) + search(1) + separator(1) = row 3
+                        let list_start_y = py + 3;
+                        let list_h = palette_h.saturating_sub(4) as usize;
+
+                        if mouse.column >= px
+                            && mouse.column < px + palette_w
+                            && mouse.row >= list_start_y
+                            && mouse.row < list_start_y + list_h as u16
+                        {
+                            let clicked_row = (mouse.row - list_start_y) as usize;
+                            if let InputMode::CommandPalette { search, selected, .. } =
+                                &mut app.mode
+                            {
+                                let filtered = filtered_indices(search);
+                                // Build row offsets accounting for group headers
+                                // (group headers only appear when search is empty)
+                                let mut row = 0usize;
+                                let mut last_group = "";
+                                for (vis_idx, &cmd_idx) in filtered.iter().enumerate() {
+                                    let cmd = &COMMANDS[cmd_idx];
+                                    if cmd.group != last_group && search.is_empty() {
+                                        if row == clicked_row {
+                                            // clicked a group header — ignore
+                                            break;
+                                        }
+                                        row += 1;
+                                        last_group = cmd.group;
+                                    }
+                                    if row == clicked_row {
+                                        *selected = vis_idx;
+                                        let cmd_id = COMMANDS[cmd_idx].id;
+                                        app.mode = InputMode::Normal;
+                                        execute_command(cmd_id, app, writer, term_h).await;
+                                        return;
+                                    }
+                                    row += 1;
+                                }
+                            }
+                        }
+                        app.needs_redraw = true;
+                    }
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if app.mobile_view == MobileView::Windows {
+                match app.mobile_col_focus {
+                    MobileColFocus::Left => {
+                        app.mobile_spaces_cursor =
+                            app.mobile_spaces_cursor.saturating_sub(1);
+                    }
+                    MobileColFocus::Right => {
+                        app.mobile_tabs_cursor = app.mobile_tabs_cursor.saturating_sub(1);
+                    }
+                }
+                app.needs_redraw = true;
+            } else if app.mobile_view == MobileView::Actions {
+                if let InputMode::CommandPalette { selected, .. } = &mut app.mode {
+                    *selected = selected.saturating_sub(1);
+                    app.needs_redraw = true;
+                }
+            } else if app.mobile_view == MobileView::Terminal
+                && matches!(app.mode, InputMode::Scroll { .. })
+            {
+                if let InputMode::Scroll { offset } = &mut app.mode {
+                    *offset = (*offset + 3).min(
+                        app.panes
+                            .get(&app.active_pane)
+                            .map(|p| p.scrollback.len())
+                            .unwrap_or(0),
+                    );
+                }
+                app.needs_redraw = true;
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if app.mobile_view == MobileView::Windows {
+                match app.mobile_col_focus {
+                    MobileColFocus::Left => {
+                        let max = app.spaces.len();
+                        app.mobile_spaces_cursor =
+                            (app.mobile_spaces_cursor + 1).min(max);
+                    }
+                    MobileColFocus::Right => {
+                        let max = app.tabs.len();
+                        app.mobile_tabs_cursor = (app.mobile_tabs_cursor + 1).min(max);
+                    }
+                }
+                app.needs_redraw = true;
+            } else if app.mobile_view == MobileView::Actions {
+                if let InputMode::CommandPalette { search, selected, .. } = &mut app.mode {
+                    let max = filtered_indices(search).len();
+                    if max > 0 {
+                        *selected = (*selected + 1).min(max - 1);
+                    }
+                    app.needs_redraw = true;
+                }
+            } else if app.mobile_view == MobileView::Terminal {
+                if let InputMode::Scroll { offset } = &mut app.mode {
+                    *offset = offset.saturating_sub(3);
+                    if *offset == 0 {
+                        app.mode = InputMode::Normal;
+                    }
+                    app.needs_redraw = true;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 async fn handle_mouse(
     mouse: crossterm::event::MouseEvent,
     app: &mut App,
     writer: &IpcWriter,
     term_size: ratatui::layout::Rect,
 ) {
+    // Mobile mode has its own simplified mouse handler.
+    if app.mobile_mode {
+        handle_mobile_mouse(mouse, app, writer, term_size).await;
+        return;
+    }
+
     if app.settings_open {
         return;
     }
@@ -1335,16 +1945,16 @@ async fn handle_mouse(
                         return;
                     }
                     // "[A] Agent Fleet[badge] " — width varies with fleet badge.
-                    let sats_badge_len: u16 = if !app.agent_panel_mode.is_visible() && !app.agents.is_empty()
-                    {
-                        if app.agents.len() < 10 {
-                            3
+                    let sats_badge_len: u16 =
+                        if !app.agent_panel_mode.is_visible() && !app.agents.is_empty() {
+                            if app.agents.len() < 10 {
+                                3
+                            } else {
+                                4
+                            }
                         } else {
-                            4
-                        }
-                    } else {
-                        0
-                    };
+                            0
+                        };
                     let sats_w = 16u16 + sats_badge_len;
                     let sats_start = term_w.saturating_sub(agent_w + sats_w);
                     if mouse.column >= sats_start && mouse.column < term_w.saturating_sub(agent_w) {
@@ -2041,16 +2651,16 @@ async fn handle_mouse(
                 }
                 // Check [A] Agent Fleet button (right-aligned, width varies with fleet badge).
                 if hovered.is_none() {
-                    let sats_badge_len: u16 = if !app.agent_panel_mode.is_visible() && !app.agents.is_empty()
-                    {
-                        if app.agents.len() < 10 {
-                            3
+                    let sats_badge_len: u16 =
+                        if !app.agent_panel_mode.is_visible() && !app.agents.is_empty() {
+                            if app.agents.len() < 10 {
+                                3
+                            } else {
+                                4
+                            }
                         } else {
-                            4
-                        }
-                    } else {
-                        0
-                    };
+                            0
+                        };
                     let badge_start = term_w.saturating_sub(agent_w + 16 + sats_badge_len);
                     let badge_end = term_w.saturating_sub(agent_w);
                     if mouse.column >= badge_start && mouse.column < badge_end {
