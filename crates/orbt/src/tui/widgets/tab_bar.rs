@@ -16,7 +16,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         area,
     );
 
-    let fleet_badge: String = if !app.agent_panel_visible && !app.agents.is_empty() {
+    let fleet_badge: String = if !app.agent_panel_mode.is_visible() && !app.agents.is_empty() {
         let n_blocked = app
             .agents
             .iter()
@@ -104,14 +104,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Style::default().bg(bg_secondary()),
     ));
 
-    let (agent_fg, agent_bg) = if app.agent_panel_visible {
+    let (agent_fg, agent_bg) = if app.agent_panel_mode.is_visible() {
         (bg_primary(), accent())
     } else if app.tab_hovered == Some(app.tabs.len() + 1) {
         (fg_primary(), accent_hover())
     } else {
         (fg_muted(), bg_card())
     };
-    let badge_icon_color = if !app.agent_panel_visible {
+    let badge_icon_color = if !app.agent_panel_mode.is_visible() {
         let n_blocked = app
             .agents
             .iter()

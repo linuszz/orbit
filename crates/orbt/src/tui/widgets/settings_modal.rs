@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{AgentPanelMode, App};
 use crate::tui::theme::*;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -57,7 +57,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .collect::<Vec<_>>()
         .join(" ");
     let sidebar_display = if app.sidebar_visible { "On" } else { "Off" };
-    let agent_display = if app.agent_panel_visible { "On" } else { "Off" };
+    let agent_display = match app.agent_panel_mode {
+        AgentPanelMode::Sidebar => "Sidebar",
+        AgentPanelMode::Modal => "Modal",
+        AgentPanelMode::Hidden => "Off",
+    };
 
     let rows: Vec<(&str, String)> = vec![
         ("Theme", theme_display),

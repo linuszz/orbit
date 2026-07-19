@@ -17,7 +17,7 @@ use ratatui::{
 };
 use std::io::{self, Stdout};
 
-use crate::app::{App, InputMode, PaneState, Selection};
+use crate::app::{AgentPanelMode, App, InputMode, PaneState, Selection};
 use orbt_protocol::Cell;
 use orbt_protocol::PaneLayout;
 use theme::*;
@@ -60,11 +60,10 @@ pub fn term_color(c: &TermColor) -> Color {
 pub const SIDEBAR_W: u16 = 24;
 pub const SIDEBAR_COLLAPSED_W: u16 = 5;
 
-/// §6.7 responsive agent panel width:
-///   Ultra ≥140 → 25 cols, Wide/Standard 80-139 → 22 cols, Compact <80 → 0.
-///   22 is the minimum needed for the 3-button row (1+6+1+6+1+6 = 21 inner chars).
-pub fn agent_panel_width(term_w: u16, visible: bool) -> u16 {
-    if !visible || term_w < 80 {
+/// §6.7 responsive agent panel width.
+/// Only Sidebar mode occupies layout columns; Modal floats and returns 0.
+pub fn agent_panel_width(term_w: u16, mode: AgentPanelMode) -> u16 {
+    if mode != AgentPanelMode::Sidebar || term_w < 80 {
         0
     } else if term_w >= 140 {
         25
@@ -84,7 +83,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = agent_panel_width(area.width, app.agent_panel_visible);
+    let agent_w = agent_panel_width(area.width, app.agent_panel_mode);
 
     let cols = ratatui::layout::Layout::horizontal([
         ratatui::layout::Constraint::Length(sidebar_w),
@@ -143,14 +142,20 @@ pub fn render(frame: &mut Frame, app: &App) {
     let border_y = rows[2].y + 1;
     widgets::status_bar::render(frame, status_inner, app);
 
-    if app.agent_panel_visible {
-        let agent_area = Rect {
-            x: cols[2].x,
-            y: cols[2].y,
-            width: cols[2].width,
-            height: cols[2].height.saturating_sub(1),
-        };
-        widgets::agent_monitor::render(frame, agent_area, app);
+    match app.agent_panel_mode {
+        AgentPanelMode::Sidebar => {
+            let agent_area = Rect {
+                x: cols[2].x,
+                y: cols[2].y,
+                width: cols[2].width,
+                height: cols[2].height.saturating_sub(1),
+            };
+            widgets::agent_monitor::render(frame, agent_area, app);
+        }
+        AgentPanelMode::Modal => {
+            widgets::agent_monitor::render_modal(frame, area, app);
+        }
+        AgentPanelMode::Hidden => {}
     }
 
     let sep = "\u{2500}";
@@ -842,7 +847,7 @@ mod tests {
             }),
         });
         let mut app = App::from_welcome(&state, 120, 30);
-        app.agent_panel_visible = true;
+        app.agent_panel_mode = AgentPanelMode::Sidebar;
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| render(f, &app)).unwrap();
@@ -872,7 +877,7 @@ mod tests {
             }),
         });
         let mut app = App::from_welcome(&state, 120, 30);
-        app.agent_panel_visible = true;
+        app.agent_panel_mode = AgentPanelMode::Sidebar;
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| render(f, &app)).unwrap();

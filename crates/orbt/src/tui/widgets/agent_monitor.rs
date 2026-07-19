@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -735,4 +735,35 @@ pub fn card_start_row(
     let above_row = if scroll_offset > 0 { 1u16 } else { 0 };
     let blocked_rows = if any_blocked { 2u16 } else { 0 };
     panel_y + 2 + above_row + blocked_rows + card_idx as u16 * 6
+}
+
+/// Render the Agent Fleet panel as a floating modal centered over `screen`.
+/// Width: 36 cols (fits a full card), height: up to 80% of screen or 32 rows.
+pub fn render_modal(frame: &mut Frame, screen: Rect, app: &App) {
+    let modal_w: u16 = 36.min(screen.width.saturating_sub(4));
+    let n = app.agents.len().max(1);
+    // Each card is 6 rows; add 4 for header + footer.
+    let content_h = (n as u16 * 6 + 4).min((screen.height * 4 / 5).max(10));
+    let modal_h = content_h.min(screen.height.saturating_sub(4));
+
+    let x = screen.x + screen.width.saturating_sub(modal_w) / 2;
+    let y = screen.y + screen.height.saturating_sub(modal_h) / 2;
+    let area = Rect { x, y, width: modal_w, height: modal_h };
+
+    // Clear background area to avoid bleed-through from pane content.
+    frame.render_widget(Clear, area);
+
+    // Outer border with title.
+    let title = format!(" Satellite Fleet ({}) ", app.agents.len());
+    let mode_hint = " [a] close  [Tab] sidebar ";
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(accent()))
+        .title(Span::styled(title, Style::default().fg(accent())))
+        .title_bottom(Span::styled(mode_hint, Style::default().fg(fg_muted())));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Render the panel content into the inner area (reuse sidebar render logic).
+    render(frame, inner, app);
 }

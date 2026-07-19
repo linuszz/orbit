@@ -20,6 +20,7 @@ use tracing::debug;
 const AGENT_PATTERNS: &[&str] = &[
     "claude",
     "claude-code",
+    "opencode",
     "codex",
     "aider",
     "gh-copilot",
@@ -54,6 +55,10 @@ const BLOCK_PATTERNS: &[&str] = &[
     "Approve this",
     "confirm this",
     "Confirm this",
+    // opencode patterns
+    "Do you want to run",
+    "Allow tool",
+    "Approve tool",
     // Aider patterns
     "Add these files",
     "Create new file",
@@ -500,10 +505,13 @@ fn agent_name_for(pid: u32) -> Option<String> {
 }
 
 /// Extract the `--model` value from a process cmdline, if present.
+/// Also reads OPENCODE_MODEL from process environment for opencode.
 #[cfg(target_os = "linux")]
 fn extract_model(pid: u32) -> Option<String> {
     let cmdline = read_cmdline(pid)?;
     let args: Vec<&str> = cmdline.split('\0').filter(|s| !s.is_empty()).collect();
+
+    // Check cmdline flags first (works for all agents including opencode).
     for (i, arg) in args.iter().enumerate() {
         if *arg == "--model" || *arg == "-m" {
             return args.get(i + 1).map(|s| s.to_string());
@@ -512,6 +520,23 @@ fn extract_model(pid: u32) -> Option<String> {
             return Some(model.to_string());
         }
     }
+
+    // opencode falls back to OPENCODE_MODEL env var.
+    let exe = args.first().copied().unwrap_or("");
+    let basename = std::path::Path::new(exe)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if basename == "opencode" || basename.starts_with("opencode-") {
+        if let Ok(env) = std::fs::read_to_string(format!("/proc/{pid}/environ")) {
+            for entry in env.split('\0') {
+                if let Some(val) = entry.strip_prefix("OPENCODE_MODEL=") {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+
     None
 }
 

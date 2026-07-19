@@ -7,10 +7,42 @@ use orbt_protocol::{
     ServerEvent, SpaceId, SplitDir, TabId,
 };
 
+/// How the Agent Fleet panel is displayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPanelMode {
+    /// Hidden — panel not shown.
+    #[default]
+    Hidden,
+    /// Sidebar — panel occupies a fixed column on the right side of the layout.
+    Sidebar,
+    /// Modal — panel floats as a centered overlay over the main pane area.
+    Modal,
+}
+
+impl AgentPanelMode {
+    /// Cycle: Hidden → Sidebar → Modal → Hidden.
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Hidden => Self::Sidebar,
+            Self::Sidebar => Self::Modal,
+            Self::Modal => Self::Hidden,
+        }
+    }
+
+    pub fn is_visible(self) -> bool {
+        !matches!(self, Self::Hidden)
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct UserSettings {
     pub theme: String,
     pub sidebar_visible: bool,
+    #[serde(default)]
+    pub agent_panel_mode: AgentPanelMode,
+    /// Legacy field — migrated to agent_panel_mode on load.
+    #[serde(default, skip_serializing)]
     pub agent_panel_visible: bool,
 }
 
@@ -19,6 +51,7 @@ impl Default for UserSettings {
         Self {
             theme: "orbt".to_string(),
             sidebar_visible: true,
+            agent_panel_mode: AgentPanelMode::Hidden,
             agent_panel_visible: false,
         }
     }
@@ -34,17 +67,23 @@ fn settings_path() -> std::path::PathBuf {
 
 pub fn load_settings() -> UserSettings {
     let path = settings_path();
-    std::fs::read_to_string(&path)
+    let mut s: UserSettings = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // Migrate legacy agent_panel_visible → agent_panel_mode.
+    if s.agent_panel_mode == AgentPanelMode::Hidden && s.agent_panel_visible {
+        s.agent_panel_mode = AgentPanelMode::Sidebar;
+    }
+    s
 }
 
 pub fn save_settings(app: &App) {
     let settings = UserSettings {
         theme: app.theme_name.clone(),
         sidebar_visible: app.sidebar_visible,
-        agent_panel_visible: app.agent_panel_visible,
+        agent_panel_mode: app.agent_panel_mode,
+        agent_panel_visible: false,
     };
     let path = settings_path();
     if let Some(parent) = path.parent() {
@@ -321,7 +360,7 @@ pub struct App {
     pub needs_resize: bool,
     pub server_connected: bool,
     pub sidebar_visible: bool,
-    pub agent_panel_visible: bool,
+    pub agent_panel_mode: AgentPanelMode,
     pub show_help: bool,
     pub context_menu: Option<ContextMenu>,
     pub space_name: String,
@@ -469,7 +508,7 @@ impl App {
             needs_resize: false,
             server_connected: true,
             sidebar_visible: true,
-            agent_panel_visible: false,
+            agent_panel_mode: AgentPanelMode::Hidden,
             show_help: false,
             context_menu: None,
             space_name: spaces
@@ -943,7 +982,10 @@ impl App {
                 }
                 self.agents.push(info.clone());
                 self.sort_agents();
-                self.agent_panel_visible = true;
+                // Auto-open in Sidebar mode when a new agent is detected, unless already Modal.
+                if self.agent_panel_mode == AgentPanelMode::Hidden {
+                    self.agent_panel_mode = AgentPanelMode::Sidebar;
+                }
                 self.needs_redraw = true;
             }
             ServerEvent::AgentRemoved(id) => {
@@ -1246,7 +1288,7 @@ mod tests {
         app.handle_server_event(&ServerEvent::AgentCreated(info));
         assert_eq!(app.agents.len(), 1);
         assert_eq!(app.agents[0].id, AgentId(10));
-        assert!(app.agent_panel_visible); // auto-opens
+        assert_eq!(app.agent_panel_mode, AgentPanelMode::Sidebar); // auto-opens
         assert!(app.agent_start_times.contains_key(&AgentId(10)));
     }
 
@@ -1386,13 +1428,25 @@ mod tests {
         let settings = UserSettings {
             theme: "orange".to_string(),
             sidebar_visible: false,
-            agent_panel_visible: true,
+            agent_panel_mode: AgentPanelMode::Modal,
+            agent_panel_visible: false,
         };
         let toml_str = toml::to_string(&settings).unwrap();
         let restored: UserSettings = toml::from_str(&toml_str).unwrap();
         assert_eq!(restored.theme, "orange");
         assert!(!restored.sidebar_visible);
-        assert!(restored.agent_panel_visible);
+        assert_eq!(restored.agent_panel_mode, AgentPanelMode::Modal);
+    }
+
+    #[test]
+    fn settings_legacy_migration() {
+        // Old settings.toml with agent_panel_visible=true and no agent_panel_mode.
+        let toml_str = "theme = \"orbt\"\nsidebar_visible = true\nagent_panel_visible = true\n";
+        let mut s: UserSettings = toml::from_str(toml_str).unwrap();
+        if s.agent_panel_mode == AgentPanelMode::Hidden && s.agent_panel_visible {
+            s.agent_panel_mode = AgentPanelMode::Sidebar;
+        }
+        assert_eq!(s.agent_panel_mode, AgentPanelMode::Sidebar);
     }
 
     #[test]
@@ -1400,6 +1454,6 @@ mod tests {
         let settings = UserSettings::default();
         assert_eq!(settings.theme, "orbt");
         assert!(settings.sidebar_visible);
-        assert!(!settings.agent_panel_visible);
+        assert_eq!(settings.agent_panel_mode, AgentPanelMode::Hidden);
     }
 }

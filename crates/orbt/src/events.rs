@@ -7,7 +7,9 @@ use orbt_protocol::{ClientMessage, SplitDir};
 use tracing::debug;
 
 use crate::ipc::{IpcReader, IpcWriter};
-use orbt_tui::app::{AgentHover, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS};
+use orbt_tui::app::{
+    AgentHover, AgentPanelMode, App, ContextMenuItem, ContextMenuTarget, InputMode, COMMANDS,
+};
 use orbt_tui::tui::{agent_panel_width, render, OrbitTerminal, SIDEBAR_COLLAPSED_W, SIDEBAR_W};
 
 fn is_prefix_key(key: &KeyEvent) -> bool {
@@ -69,7 +71,7 @@ fn compute_pane_area(term_cols: u16, term_rows: u16, app: &App) -> ratatui::layo
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = agent_panel_width(term_cols, app.agent_panel_visible);
+    let agent_w = agent_panel_width(term_cols, app.agent_panel_mode);
     let total_cols = term_cols.saturating_sub(sidebar_w + agent_w).max(20);
     let total_rows = term_rows.saturating_sub(3).max(5);
     ratatui::layout::Rect {
@@ -153,8 +155,8 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
             orbt_tui::app::save_settings(app);
         }
         "toggle_agent" => {
-            app.agent_panel_visible = !app.agent_panel_visible;
-            if app.agent_panel_visible {
+            app.agent_panel_mode = app.agent_panel_mode.cycle();
+            if app.agent_panel_mode.is_visible() {
                 let sel = if let InputMode::AgentPanel { selected } = app.mode {
                     selected
                 } else {
@@ -169,12 +171,12 @@ async fn execute_command(id: &str, app: &mut App, writer: &IpcWriter, term_h: u1
             orbt_tui::app::save_settings(app);
         }
         "agent_scroll_up" => {
-            if app.agent_panel_visible {
+            if app.agent_panel_mode.is_visible() {
                 app.agent_scroll_offset = app.agent_scroll_offset.saturating_sub(1);
             }
         }
         "agent_scroll_down" => {
-            if app.agent_panel_visible {
+            if app.agent_panel_mode.is_visible() {
                 let banner_rows: u16 = if app
                     .agents
                     .iter()
@@ -454,7 +456,7 @@ async fn handle_key(key: KeyEvent, app: &mut App, writer: &IpcWriter, term_h: u1
                     orbt_tui::app::save_settings(app);
                 }
                 2 => {
-                    app.agent_panel_visible = !app.agent_panel_visible;
+                    app.agent_panel_mode = app.agent_panel_mode.cycle();
                     orbt_tui::app::save_settings(app);
                 }
                 _ => {}
@@ -1289,7 +1291,7 @@ async fn handle_mouse(
     } else {
         SIDEBAR_COLLAPSED_W
     };
-    let agent_w = agent_panel_width(term_size.width, app.agent_panel_visible);
+    let agent_w = agent_panel_width(term_size.width, app.agent_panel_mode);
     let term_w = term_size.width;
     let term_h = term_size.height;
 
@@ -1333,7 +1335,7 @@ async fn handle_mouse(
                         return;
                     }
                     // "[A] Agent Fleet[badge] " — width varies with fleet badge.
-                    let sats_badge_len: u16 = if !app.agent_panel_visible && !app.agents.is_empty()
+                    let sats_badge_len: u16 = if !app.agent_panel_mode.is_visible() && !app.agents.is_empty()
                     {
                         if app.agents.len() < 10 {
                             3
@@ -1346,8 +1348,8 @@ async fn handle_mouse(
                     let sats_w = 16u16 + sats_badge_len;
                     let sats_start = term_w.saturating_sub(agent_w + sats_w);
                     if mouse.column >= sats_start && mouse.column < term_w.saturating_sub(agent_w) {
-                        app.agent_panel_visible = !app.agent_panel_visible;
-                        if app.agent_panel_visible {
+                        app.agent_panel_mode = app.agent_panel_mode.cycle();
+                        if app.agent_panel_mode.is_visible() {
                             let sel = if let InputMode::AgentPanel { selected } = app.mode {
                                 selected
                             } else {
@@ -1445,7 +1447,7 @@ async fn handle_mouse(
                 if mouse.row == 0 {
                     if mouse.column == term_w.saturating_sub(1) {
                         // × close button
-                        app.agent_panel_visible = false;
+                        app.agent_panel_mode = AgentPanelMode::Hidden;
                         app.mode = InputMode::Normal;
                         app.agent_hovered = None;
                         app.selection = None;
@@ -2039,7 +2041,7 @@ async fn handle_mouse(
                 }
                 // Check [A] Agent Fleet button (right-aligned, width varies with fleet badge).
                 if hovered.is_none() {
-                    let sats_badge_len: u16 = if !app.agent_panel_visible && !app.agents.is_empty()
+                    let sats_badge_len: u16 = if !app.agent_panel_mode.is_visible() && !app.agents.is_empty()
                     {
                         if app.agents.len() < 10 {
                             3
