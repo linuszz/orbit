@@ -75,11 +75,17 @@ impl IpcClient {
 
     pub fn into_split(self) -> (IpcWriter, IpcReader) {
         let (read_half, write_half) = tokio::io::split(self.stream);
-        let (tx, rx) = mpsc::channel::<ClientMessage>(1024);
+        let (tx, rx) = mpsc::channel::<ClientMessage>(256);
+        // alive_tx is held by the write task; when the task exits (stream error
+        // or mpsc closed), alive_tx is dropped and alive_rx resolves immediately.
+        // IpcReader uses this to surface write-side failures without waiting for
+        // TCP to time out on the read side.
+        let (alive_tx, alive_rx) = tokio::sync::oneshot::channel::<()>();
 
         tokio::spawn(async move {
             let mut write_half = write_half;
             let mut rx = rx;
+            let _alive = alive_tx;
             while let Some(msg) = rx.recv().await {
                 let bytes = match orbt_protocol::encode_message(&msg) {
                     Ok(b) => b,
@@ -91,7 +97,14 @@ impl IpcClient {
             }
         });
 
-        (IpcWriter { tx }, IpcReader { read_half })
+        (
+            IpcWriter { tx },
+            IpcReader {
+                read_half,
+                writer_alive: Some(alive_rx),
+                write_dead: false,
+            },
+        )
     }
 }
 
@@ -109,10 +122,28 @@ impl IpcWriter {
 
 pub struct IpcReader {
     read_half: ReadHalf<DynStream>,
+    /// Resolves when the write task exits (stream error). None after first fire.
+    writer_alive: Option<tokio::sync::oneshot::Receiver<()>>,
+    /// Latched true after writer_alive fires so subsequent recv() calls bail fast.
+    write_dead: bool,
 }
 
 impl IpcReader {
     pub async fn recv(&mut self) -> Result<ServerEvent> {
+        if self.write_dead {
+            bail!("IPC write task exited (connection lost)");
+        }
+        if let Some(rx) = self.writer_alive.as_mut() {
+            tokio::select! {
+                biased;
+                result = read_frame(&mut self.read_half) => return result,
+                _ = rx => {
+                    self.writer_alive = None;
+                    self.write_dead = true;
+                    bail!("IPC write task exited (connection lost)");
+                }
+            }
+        }
         read_frame(&mut self.read_half).await
     }
 }

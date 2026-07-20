@@ -237,7 +237,16 @@ async fn remote_uid(handle: &mut russh::client::Handle<SshHandler>) -> Result<u3
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 pub async fn connect_remote(spec: &RemoteSpec) -> Result<(IpcWriter, IpcReader, FullState)> {
-    let config = Arc::new(russh::client::Config::default());
+    let config = Arc::new(russh::client::Config {
+        // Send a keepalive every 30 s so NAT/firewalls don't kill idle connections.
+        // Close after 3 missed replies (≈90 s total dead-connection timeout).
+        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+        keepalive_max: 3,
+        // Disable Nagle's algorithm — interactive IPC messages are small and
+        // latency matters more than throughput.
+        nodelay: true,
+        ..Default::default()
+    });
     let handler = SshHandler {
         host: spec.host.clone(),
         port: spec.port,
