@@ -197,39 +197,41 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/root"))
 }
 
-// ─── Remote socket path resolution ───────────────────────────────────────────
+// ─── Remote UID + socket path resolution ─────────────────────────────────────
 
-async fn resolve_remote_socket(handle: &mut russh::client::Handle<SshHandler>) -> Result<String> {
+/// Runs `id -u` on the remote host and returns the numeric UID.
+/// Uses the universal POSIX command so it works regardless of the remote login shell.
+async fn remote_uid(handle: &mut russh::client::Handle<SshHandler>) -> Result<u32> {
     let mut channel = handle
         .channel_open_session()
         .await
-        .context("failed to open exec channel for socket path resolution")?;
-    channel
-        .exec(
-            true,
-            r#"echo "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/orbt.sock""#,
-        )
-        .await
-        .context("failed to exec remote socket path command")?;
+        .context("failed to open exec channel")?;
+    channel.exec(true, "id -u").await.context("failed to exec 'id -u' on remote")?;
 
-    let mut path = String::new();
+    let mut output = String::new();
+    let mut got_exit = false;
     loop {
         match channel.wait().await {
             Some(russh::ChannelMsg::Data { data }) => {
                 if let Ok(s) = std::str::from_utf8(&data) {
-                    path.push_str(s);
+                    output.push_str(s);
                 }
             }
-            Some(russh::ChannelMsg::ExitStatus { .. }) | None => break,
+            Some(russh::ChannelMsg::ExitStatus { .. }) => {
+                got_exit = true;
+            }
+            Some(russh::ChannelMsg::Eof) | None => break,
             _ => {}
+        }
+        if got_exit && !output.trim().is_empty() {
+            break;
         }
     }
 
-    let path = path.trim().to_string();
-    if path.is_empty() {
-        bail!("failed to resolve remote orbit socket path");
-    }
-    Ok(path)
+    let trimmed = output.trim();
+    trimmed
+        .parse::<u32>()
+        .with_context(|| format!("'id -u' on remote returned unexpected output: {trimmed:?}"))
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -247,13 +249,43 @@ pub async fn connect_remote(spec: &RemoteSpec) -> Result<(IpcWriter, IpcReader, 
 
     authenticate(&mut handle, &spec.user, &spec.host).await?;
 
-    let remote_socket = resolve_remote_socket(&mut handle).await?;
-    tracing::debug!("remote orbit socket: {remote_socket}");
+    // Get the remote UID via a POSIX-portable `id -u` command (works in any
+    // login shell: fish, zsh, sh, ...).  Then try socket paths in the same
+    // priority order as default_socket_path() on the server:
+    //   /run/user/{uid}/orbt.sock  →  /tmp/orbt-{uid}.sock
+    let uid = remote_uid(&mut handle).await?;
+    let candidates = [
+        format!("/run/user/{uid}/orbt.sock"),
+        format!("/tmp/orbt-{uid}.sock"),
+    ];
 
-    let channel = handle
-        .channel_open_direct_streamlocal(&remote_socket)
-        .await
-        .with_context(|| format!("failed to open direct-streamlocal channel to {remote_socket}"))?;
+    let mut channel_opt = None;
+    let mut tried: Vec<&str> = Vec::new();
+    for path in &candidates {
+        tracing::debug!("trying remote orbit socket: {path}");
+        match handle.channel_open_direct_streamlocal(path).await {
+            Ok(ch) => {
+                tracing::debug!("connected to remote orbit socket: {path}");
+                channel_opt = Some(ch);
+                break;
+            }
+            Err(e) => {
+                tracing::debug!("  {path}: {e:#}");
+                tried.push(path);
+            }
+        }
+    }
+
+    let channel = channel_opt.with_context(|| {
+        format!(
+            "orbt daemon not reachable on {} (tried: {})\n\
+             Start it with: ssh {}@{} 'orbt daemon &'",
+            spec.host,
+            tried.join(", "),
+            spec.user,
+            spec.host,
+        )
+    })?;
 
     let stream = channel.into_stream();
 
