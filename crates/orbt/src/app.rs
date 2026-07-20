@@ -1170,6 +1170,7 @@ mod tests {
                 progress: None,
                 duration_s: 0,
             }),
+            protocol: orbt_protocol::AgentProtocol::Heuristic,
         }
     }
 

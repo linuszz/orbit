@@ -286,6 +286,19 @@ pub struct TabInfo {
     pub active_pane: PaneId,
 }
 
+/// Which protocol is used to track this agent's status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentProtocol {
+    /// Detected via PTY output heuristics and /proc polling.
+    #[default]
+    Heuristic,
+    /// Agent binary supports ACP but is running in interactive PTY mode (not ACP-connected).
+    AcpCapable,
+    /// Actively connected to the agent via ACP JSON-RPC.
+    AcpConnected,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInfo {
     pub id: AgentId,
@@ -295,6 +308,9 @@ pub struct AgentInfo {
     pub model: String,
     pub status: AgentStatus,
     pub detail: Option<AgentDetail>,
+    /// Detection/connection protocol. Defaults to Heuristic for backward compatibility.
+    #[serde(default)]
+    pub protocol: AgentProtocol,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

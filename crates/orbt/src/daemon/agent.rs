@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(target_os = "linux")]
 use orbt_protocol::{AgentDetail, AgentMetrics};
-use orbt_protocol::{AgentId, AgentInfo, AgentStatus, PaneId, ServerEvent, SpaceId};
+use orbt_protocol::{AgentId, AgentInfo, AgentProtocol, AgentStatus, PaneId, ServerEvent, SpaceId};
 use tokio::sync::{broadcast, RwLock};
 use tracing::debug;
 
@@ -30,6 +30,13 @@ const AGENT_PATTERNS: &[&str] = &[
 /// Script runner executables — when detected, also scan their path arguments.
 #[cfg(target_os = "linux")]
 const SCRIPT_RUNNERS: &[&str] = &["node", "npx", "python", "python3", "deno", "bun"];
+
+/// Agent names that support the Agent Client Protocol (ACP).
+/// When detected, these are marked AcpCapable rather than Heuristic.
+#[cfg(target_os = "linux")]
+const ACP_CAPABLE_AGENTS: &[&str] = &[
+    "opencode", "gemini", "gemini-cli", "codex", "codex-cli", "cline",
+];
 
 /// Output patterns that indicate an agent is waiting for user input (Blocked/Eclipse state).
 const BLOCK_PATTERNS: &[&str] = &[
@@ -317,6 +324,11 @@ impl AgentRegistry {
                                         AgentId(self.next_id.fetch_add(1, Ordering::Relaxed));
                                     let model = extract_model(*cpid).unwrap_or_default();
                                     let task = extract_task(*cpid);
+                                    let protocol = if ACP_CAPABLE_AGENTS.contains(&name.as_str()) {
+                                        AgentProtocol::AcpCapable
+                                    } else {
+                                        AgentProtocol::Heuristic
+                                    };
                                     let info = AgentInfo {
                                         id,
                                         name,
@@ -328,6 +340,7 @@ impl AgentRegistry {
                                             task,
                                             ..Default::default()
                                         }),
+                                        protocol,
                                     };
                                     tracked.insert(*cpid, (id, Instant::now()));
                                     self.agents.write().await.push(info.clone());
@@ -467,7 +480,13 @@ impl AgentRegistry {
 fn agent_name_for(pid: u32) -> Option<String> {
     let cmdline = read_cmdline(pid)?;
     let args: Vec<&str> = cmdline.split('\0').filter(|s| !s.is_empty()).collect();
+    agent_name_from_args(&args)
+}
 
+/// Pure matching logic: returns the canonical agent name given a cmdline argv slice.
+/// `args[0]` is argv[0] (the executable name as the OS saw it, preserved through Nix wrappers).
+#[cfg(target_os = "linux")]
+fn agent_name_from_args(args: &[&str]) -> Option<String> {
     let exe = args.first().copied().unwrap_or("");
     let basename = std::path::Path::new(exe)
         .file_name()
@@ -775,5 +794,73 @@ mod tests {
         // CSI cursor move + reset
         assert_eq!(strip_ansi("\x1b[2J\x1b[H"), "");
         assert_eq!(strip_ansi("a\x1b[1mb\x1b[0mc"), "abc");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detect_claude_native_binary() {
+        // claude binary (non-Nix): argv[0] = "claude"
+        let args = &["claude", "--print", "say hi"];
+        assert_eq!(agent_name_from_args(args), Some("claude".to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detect_claude_nix_wrapper() {
+        // Nix wraps claude: argv[0] is preserved as "claude" even though
+        // /proc/pid/exe points to .claude-wrapped
+        let args = &[
+            "claude",
+            "--model",
+            "claude-opus-4-5",
+            "--print",
+            "say hi",
+        ];
+        assert_eq!(agent_name_from_args(args), Some("claude".to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detect_opencode_via_node_pnpm() {
+        // opencode bash wrapper: exec pnpm dlx opencode-ai@latest
+        // pnpm itself is node, so argv[0] = node and "opencode" appears as a positional arg
+        let args = &[
+            "/nix/store/hash-nodejs/bin/node",
+            "/nix/store/hash-pnpm/bin/pnpm",
+            "dlx",
+            "opencode",
+        ];
+        assert_eq!(agent_name_from_args(args), Some("opencode".to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detect_opencode_via_node_pnpm_versioned() {
+        // pnpm dlx with version suffix: "opencode-ai@latest" path component
+        let args = &[
+            "/nix/store/hash-nodejs/bin/node",
+            "/nix/store/hash-pnpm/bin/pnpm",
+            "dlx",
+            "opencode-ai@latest",
+        ];
+        assert_eq!(agent_name_from_args(args), Some("opencode".to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detect_opencode_via_node_script_path() {
+        // Node running the downloaded opencode package directly
+        let args = &[
+            "/nix/store/hash-nodejs/bin/node",
+            "/home/user/.cache/pnpm/dlx/hash/node_modules/opencode/dist/index.js",
+        ];
+        assert_eq!(agent_name_from_args(args), Some("opencode".to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detect_unrelated_node_process_not_matched() {
+        let args = &["/usr/bin/node", "/home/user/.local/bin/some-other-tool"];
+        assert_eq!(agent_name_from_args(args), None);
     }
 }

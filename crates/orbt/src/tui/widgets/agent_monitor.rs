@@ -1,4 +1,4 @@
-use orbt_protocol::{AgentInfo, AgentMetrics, AgentStatus};
+use orbt_protocol::{AgentInfo, AgentMetrics, AgentProtocol, AgentStatus};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -10,7 +10,7 @@ use ratatui::{
 use crate::app::{AgentHover, App, InputMode};
 use crate::tui::theme::*;
 
-fn status_icon(status: &AgentStatus) -> &'static str {
+pub fn status_icon(status: &AgentStatus) -> &'static str {
     match status {
         AgentStatus::Working => "\u{25CF}", // ●
         AgentStatus::Idle => "\u{25CB}",    // ○
@@ -88,7 +88,7 @@ fn animated_status_color(status: &AgentStatus, tick: u64) -> ratatui::style::Col
     }
 }
 
-fn status_label(status: &AgentStatus) -> &'static str {
+pub fn status_label(status: &AgentStatus) -> &'static str {
     match status {
         AgentStatus::Working => "Working",
         AgentStatus::Idle => "Standby",
@@ -490,12 +490,11 @@ fn render_card(
         );
     }
 
-    // Row 1: sel_mark + "cwd · model" (left) + rss (right).
+    // Row 1: sel_mark + "cwd · model" + optional "[ACP]" badge + rss (right-aligned).
     {
         let rss_str = metrics.and_then(|m| m.rss_kb).map(format_rss);
         let inner_w = w.saturating_sub(1) as usize; // sel_mark takes col 0
 
-        // Short cwd: basename of the space's working directory.
         let cwd_short = app
             .spaces
             .iter()
@@ -507,7 +506,6 @@ fn render_card(
                     .map(str::to_string)
             });
 
-        // left = "cwd · model" — omit separator when model is empty.
         let left_content = match (&cwd_short, agent.model.is_empty()) {
             (Some(cwd), false) if !cwd.is_empty() => {
                 format!("{} \u{00B7} {}", cwd, agent.model)
@@ -516,24 +514,32 @@ fn render_card(
             (_, false) => agent.model.clone(),
             _ => String::new(),
         };
+
+        let is_acp = !matches!(agent.protocol, AgentProtocol::Heuristic);
+        let badge = if is_acp { " [ACP]" } else { "" };
+        let badge_len = badge.len();
+
         let right = rss_str.unwrap_or_default();
-        let left_max = if right.is_empty() {
-            inner_w
-        } else {
-            inner_w.saturating_sub(right.len() + 1)
-        };
+        let right_w = if right.is_empty() { 0 } else { right.len() + 1 };
+        let left_max = inner_w.saturating_sub(badge_len + right_w);
         let left = truncate_str(&left_content, left_max);
-        let model_body = if right.is_empty() {
-            format!("{:<width$}", left, width = inner_w)
-        } else {
-            let pad = inner_w.saturating_sub(left.len() + right.len());
-            format!("{}{}{}", left, " ".repeat(pad), right)
-        };
+        let pad = inner_w.saturating_sub(left.len() + badge_len + right_w);
+
+        let mut row1_spans = vec![
+            sel_mark.clone(),
+            Span::styled(left, Style::default().fg(fg_muted()).bg(card_bg)),
+        ];
+        if is_acp {
+            row1_spans
+                .push(Span::styled(badge, Style::default().fg(accent_idle()).bg(card_bg)));
+        }
+        row1_spans.push(Span::styled(" ".repeat(pad), Style::default().bg(card_bg)));
+        if !right.is_empty() {
+            row1_spans.push(Span::styled(right, Style::default().fg(fg_muted()).bg(card_bg)));
+        }
+
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                sel_mark.clone(),
-                Span::styled(model_body, Style::default().fg(fg_muted()).bg(card_bg)),
-            ])),
+            Paragraph::new(Line::from(row1_spans)),
             Rect {
                 x,
                 y: y + 1,

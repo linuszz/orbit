@@ -1,3 +1,4 @@
+use orbt_protocol::AgentProtocol;
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -8,6 +9,7 @@ use ratatui::{
 
 use crate::app::{AgentPanelMode, App};
 use crate::tui::theme::*;
+use crate::tui::widgets::agent_monitor::{status_icon, status_label};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if !app.settings_open {
@@ -15,15 +17,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let modal_w = 52u16.min(area.width.saturating_sub(4));
-    let modal_h = 12u16.min(area.height.saturating_sub(4));
+    // Dynamic height: base 12 for 3 settings rows + 2 for satellites header + N agent rows.
+    let satellite_rows = app.agents.len().max(1) as u16;
+    let modal_h = (14 + satellite_rows).min(area.height.saturating_sub(4));
     let x = area.x + area.width.saturating_sub(modal_w) / 2;
     let y = area.y + area.height.saturating_sub(modal_h) / 2;
-    let modal_area = Rect {
-        x,
-        y,
-        width: modal_w,
-        height: modal_h,
-    };
+    let modal_area = Rect { x, y, width: modal_w, height: modal_h };
 
     frame.render_widget(Clear, modal_area);
 
@@ -73,24 +72,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let value = value.as_str();
         let is_selected = i == app.settings_selected;
         let row_y = inner.y + i as u16 + 1;
-        let bg = if is_selected {
-            bg_primary()
-        } else {
-            bg_secondary()
-        };
-        let fg_label = if is_selected {
-            fg_primary()
-        } else {
-            fg_secondary()
-        };
+        let bg = if is_selected { bg_primary() } else { bg_secondary() };
+        let fg_label = if is_selected { fg_primary() } else { fg_secondary() };
         let fg_value = if is_selected { accent() } else { fg_muted() };
         let marker = if is_selected {
             Span::styled("> ", Style::default().fg(accent()))
         } else {
             Span::raw("  ")
         };
-        // Layout: "  " marker(2) + label + gap + "[value]" flush right
-        // bracket_str width = value.len() + 2, total fixed = 2 + label + 2 + value + 2 = label+value+6
         let bracket_str = format!("[{}]", value);
         let used = 2 + label.len() as u16 + bracket_str.len() as u16;
         let gap = inner.width.saturating_sub(used);
@@ -102,13 +91,86 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ]);
         frame.render_widget(
             line,
-            Rect {
-                x: inner.x,
-                y: row_y,
-                width: inner.width,
-                height: 1,
-            },
+            Rect { x: inner.x, y: row_y, width: inner.width, height: 1 },
         );
+    }
+
+    // --- Satellites section (read-only) ---
+    let sat_header_y = inner.y + 5;
+    if sat_header_y < inner.y + inner.height.saturating_sub(2) {
+        // "── Satellites ──────" divider
+        let header_label = "\u{2500}\u{2500} Satellites ";
+        let fill = (inner.width as usize).saturating_sub(header_label.len());
+        let header_str = format!("{}{}", header_label, "\u{2500}".repeat(fill));
+        frame.render_widget(
+            Line::from(Span::styled(header_str, Style::default().fg(fg_muted()))),
+            Rect { x: inner.x, y: sat_header_y, width: inner.width, height: 1 },
+        );
+
+        let sat_start_y = sat_header_y + 1;
+        let sat_max_rows = (inner.y + inner.height).saturating_sub(sat_start_y + 1);
+
+        if app.agents.is_empty() {
+            if sat_start_y < inner.y + inner.height.saturating_sub(1) {
+                frame.render_widget(
+                    Line::from(Span::styled(
+                        "  No satellites detected",
+                        Style::default().fg(fg_muted()),
+                    )),
+                    Rect { x: inner.x, y: sat_start_y, width: inner.width, height: 1 },
+                );
+            }
+        } else {
+            for (i, agent) in app.agents.iter().take(sat_max_rows as usize).enumerate() {
+                let row_y = sat_start_y + i as u16;
+                let icon = status_icon(&agent.status);
+                let slabel = status_label(&agent.status);
+                let icon_color = match agent.status {
+                    orbt_protocol::AgentStatus::Working => accent(),
+                    orbt_protocol::AgentStatus::Idle => fg_muted(),
+                    orbt_protocol::AgentStatus::Blocked => accent_blocked(),
+                    orbt_protocol::AgentStatus::Error => accent_error(),
+                    orbt_protocol::AgentStatus::Done => fg_muted(),
+                };
+
+                let is_acp = !matches!(agent.protocol, AgentProtocol::Heuristic);
+                let (badge_str, badge_color) = if is_acp {
+                    ("[ACP] ", accent_idle())
+                } else {
+                    ("[heur]", fg_muted())
+                };
+
+                // Layout: "  icon name<16>  badge<6>  status_label"
+                let name_max = 16usize;
+                let name = if agent.name.chars().count() > name_max {
+                    let mut s: String = agent.name.chars().take(name_max - 1).collect();
+                    s.push('\u{2026}');
+                    s
+                } else {
+                    format!("{:<width$}", agent.name, width = name_max)
+                };
+
+                let right_part = format!("  {}", slabel);
+                let right_len = right_part.len() as u16;
+                // total fixed: 2 (indent) + 1 (icon) + 1 (space) + 16 (name) + 2 (pad) + 6 (badge)
+                let fixed = 2u16 + 1 + 1 + name_max as u16 + 2 + badge_str.len() as u16;
+                let pad = inner.width.saturating_sub(fixed + right_len) as usize;
+
+                frame.render_widget(
+                    Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(icon, Style::default().fg(icon_color)),
+                        Span::raw(" "),
+                        Span::styled(name, Style::default().fg(fg_secondary())),
+                        Span::raw("  "),
+                        Span::styled(badge_str, Style::default().fg(badge_color)),
+                        Span::styled(" ".repeat(pad), Style::default()),
+                        Span::styled(right_part, Style::default().fg(fg_muted())),
+                    ]),
+                    Rect { x: inner.x, y: row_y, width: inner.width, height: 1 },
+                );
+            }
+        }
     }
 
     let footer_y = inner.y + inner.height.saturating_sub(1);
@@ -122,11 +184,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ]);
     frame.render_widget(
         footer,
-        Rect {
-            x: inner.x,
-            y: footer_y,
-            width: inner.width,
-            height: 1,
-        },
+        Rect { x: inner.x, y: footer_y, width: inner.width, height: 1 },
     );
 }

@@ -922,6 +922,7 @@ mod tests {
                 progress: Some(0.5),
                 duration_s: 120,
             }),
+            protocol: orbt_protocol::AgentProtocol::Heuristic,
         });
         let mut app = App::from_welcome(&state, 120, 30);
         app.agent_panel_mode = AgentPanelMode::Sidebar;
@@ -952,6 +953,7 @@ mod tests {
                 progress: None,
                 duration_s: 30,
             }),
+            protocol: orbt_protocol::AgentProtocol::Heuristic,
         });
         let mut app = App::from_welcome(&state, 120, 30);
         app.agent_panel_mode = AgentPanelMode::Sidebar;

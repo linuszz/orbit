@@ -1050,6 +1050,86 @@ async fn scen_render_snapshot(_conn: &mut Conn) -> ScenResult {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Agent detection
+// ═══════════════════════════════════════════════════════════════════
+
+/// Run a background agent command and wait for AgentCreated, then verify
+/// the expected protocol classification.  Returns (agent_id, protocol).
+async fn run_agent_cmd(
+    conn: &mut Conn,
+    cmd: &str,
+    timeout_ms: u64,
+) -> Option<(AgentId, AgentProtocol)> {
+    let full = format!("{cmd}\r");
+    if conn.type_in(full.as_bytes()).await.is_err() {
+        return None;
+    }
+    let ev = conn
+        .wait_for(timeout_ms, |e| matches!(e, ServerEvent::AgentCreated(_)))
+        .await?;
+    match ev {
+        ServerEvent::AgentCreated(info) => Some((info.id, info.protocol)),
+        _ => None,
+    }
+}
+
+async fn scen_agent_detection_claude(conn: &mut Conn) -> ScenResult {
+    // Verify `claude` is available on PATH
+    if !conn
+        .run_cmd("command -v claude && echo FOUND", "FOUND", 3000)
+        .await
+    {
+        skip!("claude not found on PATH")
+    }
+
+    // Launch claude as a background job so the shell stays interactive
+    let result =
+        run_agent_cmd(conn, "claude --print 'say hi in one word' &", 8000).await;
+
+    match result {
+        None => fail!("no AgentCreated event within 8 s — detection not working"),
+        Some((_id, protocol)) => {
+            ensure!(
+                protocol == AgentProtocol::Heuristic,
+                "claude should be Heuristic, got {protocol:?}"
+            );
+            println!("    detected claude with protocol={protocol:?}");
+        }
+    }
+
+    // Clean up: let the background job finish (wait for shell prompt to return)
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+    pass!()
+}
+
+async fn scen_agent_detection_opencode(conn: &mut Conn) -> ScenResult {
+    // Verify opencode is available
+    if !conn
+        .run_cmd("command -v opencode && echo FOUND", "FOUND", 3000)
+        .await
+    {
+        skip!("opencode not found on PATH")
+    }
+
+    // Launch opencode's version check as a background job
+    let result = run_agent_cmd(conn, "opencode --version &", 6000).await;
+
+    match result {
+        None => fail!("no AgentCreated event within 6 s — opencode detection not working"),
+        Some((_id, protocol)) => {
+            ensure!(
+                protocol == AgentProtocol::AcpCapable,
+                "opencode should be AcpCapable, got {protocol:?}"
+            );
+            println!("    detected opencode with protocol={protocol:?}");
+        }
+    }
+
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    pass!()
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // main
 // ═══════════════════════════════════════════════════════════════════
 #[tokio::main]
@@ -1110,6 +1190,10 @@ async fn main() -> anyhow::Result<()> {
 
     run!("erase_preserves_background", scen_erase_with_background);
     run!("welcome_loads_active_space", scen_welcome_loads_active_space_panes);
+
+    println!("\n[ Agent detection ]");
+    run!("agent_detection_claude",    scen_agent_detection_claude);
+    run!("agent_detection_opencode",  scen_agent_detection_opencode);
 
     println!("\n[ Visual rendering ]");
     run!("render_snapshot",     scen_render_snapshot);

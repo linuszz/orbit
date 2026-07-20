@@ -67,11 +67,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                     };
                     let shortcut_style = Style::default().fg(accent()).bg(bg);
 
+                    // inner_w excludes the two border columns
+                    let inner_w = menu_area.width.saturating_sub(2) as usize;
                     let label_span = Span::styled(format!(" {label}"), label_style);
                     let mut spans = vec![label_span];
                     if !shortcut.is_empty() {
-                        let pad = (menu_area.width as usize)
-                            .saturating_sub(label.len() + shortcut.len() + 4);
+                        let pad = inner_w
+                            .saturating_sub(label.len() + shortcut.len() + 3);
                         spans.push(Span::styled(" ".repeat(pad), Style::default().bg(bg)));
                         spans.push(Span::styled(shortcut.clone(), shortcut_style));
                     }
@@ -80,24 +82,25 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                     frame.render_widget(
                         line,
                         Rect {
-                            x: menu_area.x,
+                            x: menu_area.x + 1,
                             y: row_y,
-                            width: menu_area.width,
+                            width: menu_area.width.saturating_sub(2),
                             height: 1,
                         },
                     );
                 }
                 ContextMenuItem::Separator => {
+                    let inner_w = menu_area.width.saturating_sub(2) as usize;
                     let line = Line::from(Span::styled(
-                        "\u{2500}".repeat(menu_area.width as usize),
+                        "\u{2500}".repeat(inner_w),
                         Style::default().fg(border()),
                     ));
                     frame.render_widget(
                         line,
                         Rect {
-                            x: menu_area.x,
+                            x: menu_area.x + 1,
                             y: row_y,
-                            width: menu_area.width,
+                            width: menu_area.width.saturating_sub(2),
                             height: 1,
                         },
                     );
